@@ -112,13 +112,13 @@ def get_sponsors_from_api(github_id, user_type):
 
         if "errors" in data:
             logging.error(f"GraphQL errors: {data['errors']}")
-            break
+            # DO NOT BREAK. RAISE EXCEPTION.
+            raise Exception("Partial fetch detected: GraphQL returned errors.")
 
-        # The data is now nested inside the 'node' field
         entity_data = data.get("data", {}).get("node", {})
         if not entity_data:
-            logging.warning("Could not find entity with the provided ID.")
-            break
+            # If we expected data but got none, abort.
+            raise Exception("Partial fetch detected: Node data missing.")
 
         if not cursor:  # First page
             sponsors_listing = entity_data.get("sponsorsListing")

@@ -192,14 +192,21 @@ class IngestWorker:
 
                 #  Crawl the user for sponsorship relations
                 print("Getting Sponsorships from GraphQL API:")
-                sponsors, sponsoring, private_count, min_sponsor_tier = (
-                    get_sponsorships(user.username, github_id, user.type)
-                )
+                try:
+                    sponsors, sponsoring, private_count, min_sponsor_tier = (
+                        get_sponsorships(user.username, github_id, user.type)
+                    )
 
-                # Always run the sync functions. They are responsible for adding new relationships
-                # AND removing old ones if the new lists are empty.
-                syncSponsors(github_id, sponsors, self.conn)
-                syncSponsorships(github_id, sponsoring, self.conn)
+                    # Only sync if we successfully got the FULL lists
+                    syncSponsors(github_id, sponsors, self.conn)
+                    syncSponsorships(github_id, sponsoring, self.conn)
+
+                except Exception as e:
+                    logging.error(
+                        f"Skipping sync for {user.username} due to fetch error: {e}"
+                    )
+                    # Do NOT update last_scraped so it tries again later
+                    continue
 
                 # Create a list of only the unique github_ids
                 # This is important if bi-directional sponsor relations exist
