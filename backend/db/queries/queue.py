@@ -84,7 +84,7 @@ def getFirstInQueue(db):
         """
         SELECT github_id, priority FROM queue
         WHERE status = 'pending'
-        ORDER BY priority ASC
+        ORDER BY priority DESC
         LIMIT 1;
         """
     )
