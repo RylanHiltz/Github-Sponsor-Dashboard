@@ -108,16 +108,14 @@ def get_sponsors_from_api(github_id, user_type):
             data = response.json()
         except Exception as e:
             logging.error(f"Failed to fetch sponsors. Error: {e}")
-            break
+            raise Exception(f"Sponsor API Error: {e}")
 
         if "errors" in data:
             logging.error(f"GraphQL errors: {data['errors']}")
-            # DO NOT BREAK. RAISE EXCEPTION.
             raise Exception("Partial fetch detected: GraphQL returned errors.")
 
         entity_data = data.get("data", {}).get("node", {})
         if not entity_data:
-            # If we expected data but got none, abort.
             raise Exception("Partial fetch detected: Node data missing.")
 
         if not cursor:  # First page
@@ -219,16 +217,18 @@ def get_sponsored_from_api(github_id, user_type):
             logging.error(
                 f"Permanently failed to fetch sponsored for ID '{github_id}' after all retries. Error: {e}"
             )
-            break
+            # CHANGED: Raise exception so worker retry logic kicks in
+            raise Exception(f"Sponsoring API Error: {e}")
 
         if "errors" in data:
             logging.error(f"GraphQL errors: {data['errors']}")
-            break
+            # CHANGED: Raise exception to protect DB from partial clears
+            raise Exception("Partial fetch detected: GraphQL returned errors.")
 
         entity_data = data.get("data", {}).get("node", {})
         if not entity_data:
             logging.warning(f"Could not find entity with the provided ID {github_id}.")
-            break
+            raise Exception("Partial fetch detected: Node data missing.")
 
         sponsored = entity_data.get("sponsorshipsAsSponsor")
         if not sponsored:
