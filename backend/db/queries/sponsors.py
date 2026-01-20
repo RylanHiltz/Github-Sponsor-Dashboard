@@ -91,17 +91,30 @@ def syncSponsors(user_id, latest_sponsor_ids, db):
 
     if sponsors_to_remove:
         with db.cursor() as cur:
+            # Insert into History
+            cur.execute(
+                """
+                INSERT INTO sponsorship_history (sponsor_id, sponsored_id, started_at, ended_at)
+                SELECT sponsor_id, sponsored_id, created_at, NOW()
+                FROM sponsorship
+                WHERE sponsored_id = %s AND sponsor_id = ANY(%s)
+                """,
+                (sponsored_row_id, list(sponsors_to_remove)),
+            )
+
+            # Delete from Active
             cur.execute(
                 """
                 DELETE FROM sponsorship
                 WHERE sponsored_id = %s AND sponsor_id = ANY(%s)
-                """,
+            """,
                 (sponsored_row_id, list(sponsors_to_remove)),
             )
 
     if sponsors_to_add:
         createSponsors(sponsored_row_id, sponsor_arr=list(sponsors_to_add), db=db)
         logging.info("Created Sponsor Relations")
+    db.commit()
     return
 
 
@@ -133,6 +146,17 @@ def syncSponsorships(user_id, latest_sponsored_ids, db):
 
     if sponsoring_to_remove:
         with db.cursor() as cur:
+            # Insert into History
+            cur.execute(
+                """
+                INSERT INTO sponsorship_history (sponsor_id, sponsored_id, started_at, ended_at)
+                SELECT sponsor_id, sponsored_id, created_at, NOW()
+                FROM sponsorship
+                WHERE sponsor_id = %s AND sponsored_id = ANY(%s)
+                """,
+                (sponsor_row_id, list(sponsoring_to_remove)),
+            )
+            # Delete from Active
             cur.execute(
                 """
                 DELETE FROM sponsorship
@@ -144,4 +168,5 @@ def syncSponsorships(user_id, latest_sponsored_ids, db):
     if sponsoring_to_add:
         createSponsoring(sponsor_row_id, sponsored_arr=list(sponsoring_to_add), db=db)
         logging.info("Created Sponsoring Relations")
+    db.commit()
     return

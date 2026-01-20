@@ -216,19 +216,19 @@ def get_sponsored_from_api(github_id, user_type):
             response = postRequest(url=URL, json=query)
             data = response.json()
         except Exception as e:
-            logging.error(
-                f"Permanently failed to fetch sponsored for ID '{github_id}' after all retries. Error: {e}"
-            )
-            break
+            logging.error(f"Failed to fetch sponsored for ID '{github_id}'. Error: {e}")
+            # FIX: Raise exception so worker retry logic kicks in
+            raise Exception(f"Sponsoring API Error: {e}")
 
         if "errors" in data:
             logging.error(f"GraphQL errors: {data['errors']}")
-            break
+            # FIX: Raise exception to protect DB
+            raise Exception("Partial fetch detected: GraphQL returned errors.")
 
         entity_data = data.get("data", {}).get("node", {})
         if not entity_data:
             logging.warning(f"Could not find entity with the provided ID {github_id}.")
-            break
+            raise Exception("Partial fetch detected: Node data missing.")
 
         sponsored = entity_data.get("sponsorshipsAsSponsor")
         if not sponsored:
