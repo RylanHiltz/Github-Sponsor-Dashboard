@@ -20,7 +20,7 @@ def init_logger():
                 filename=file_path, maxBytes=5 * 1024 * 1024, backupCount=3
             )
         ],
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
