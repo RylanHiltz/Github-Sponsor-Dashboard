@@ -31,7 +31,7 @@ def batchAddQueue(github_ids, priority, db):
     if not github_ids:
         return
 
-    # Create placeholder users with just the ID. The enrich step will fill details later.
+    # 1. ENSURE USERS EXIST FIRST
     with db.cursor() as cur:
         # Prepare a list of tuples for execute_values: [(id1,), (id2,), ...]
         user_values = [(gid,) for gid in github_ids]
@@ -41,7 +41,6 @@ def batchAddQueue(github_ids, priority, db):
             VALUES %s
             ON CONFLICT (github_id) DO NOTHING
         """
-        # "execute_values" is much faster for batch inserts
         from psycopg2.extras import execute_values
 
         execute_values(cur, insert_users_query, user_values)
@@ -55,7 +54,6 @@ def batchAddQueue(github_ids, priority, db):
             VALUES %s
             ON CONFLICT (github_id) DO UPDATE
             SET priority = GREATEST(queue.priority, EXCLUDED.priority),
-                updated_at = NOW(),
                 status = CASE 
                     WHEN queue.status = 'completed' OR queue.status = 'failed' 
                     THEN 'pending' 
