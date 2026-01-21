@@ -28,18 +28,42 @@ GITHUB_TOKEN = os.getenv("PAT")
 
 # Batch add an array of usernames to the queue for scraping
 def batchAddQueue(github_ids, priority, db):
+    if not github_ids:
+        return
 
-    entries = [(github_id, priority, "pending") for github_id in github_ids]
-
+    # Create placeholder users with just the ID. The enrich step will fill details later.
     with db.cursor() as cur:
-        cur.executemany(
-            """
-            INSERT INTO queue (github_id, priority, status)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (github_id) DO NOTHING;
-            """,
-            entries,
-        )
+        # Prepare a list of tuples for execute_values: [(id1,), (id2,), ...]
+        user_values = [(gid,) for gid in github_ids]
+
+        insert_users_query = """
+            INSERT INTO users (github_id)
+            VALUES %s
+            ON CONFLICT (github_id) DO NOTHING
+        """
+        # "execute_values" is much faster for batch inserts
+        from psycopg2.extras import execute_values
+
+        execute_values(cur, insert_users_query, user_values)
+
+    # ADD TO QUEUE (Safe because users definitely exist)
+    with db.cursor() as cur:
+        values = [(gid, priority) for gid in github_ids]
+
+        query = """
+            INSERT INTO queue (github_id, priority)
+            VALUES %s
+            ON CONFLICT (github_id) DO UPDATE
+            SET priority = GREATEST(queue.priority, EXCLUDED.priority),
+                updated_at = NOW(),
+                status = CASE 
+                    WHEN queue.status = 'completed' OR queue.status = 'failed' 
+                    THEN 'pending' 
+                    ELSE queue.status 
+                END
+        """
+        execute_values(cur, query, values)
+
     db.commit()
     cur.close()
     return
