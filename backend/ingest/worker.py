@@ -259,6 +259,9 @@ class IngestWorker:
                     github_id, private_count, min_sponsor_tier, db=self.conn
                 )
 
+                # Force commit to save the "completed" status immediately
+                self.conn.commit()
+
                 # Print the elapsed time taken to crawl the current user
                 end = time.time()
                 elapsed = end - start
