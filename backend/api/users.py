@@ -2,6 +2,7 @@ from backend.utils.db_conn import db_connection
 from flask import Blueprint, jsonify, request
 from psycopg2.extras import RealDictCursor
 import json
+import pandas as pd
 
 # Endpoint for Users
 users_bp = Blueprint("users", __name__)
@@ -297,3 +298,73 @@ def get_user(user_id):
             return jsonify({"error": "User not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@users_bp.route("/api/user/<int:user_id>/sponsorship-history", methods=["GET"])
+def get_sponsorship_history_route(user_id):
+    conn = db_connection()
+    try:
+        # 1. Get Interval from Query Params (Default to 'W')
+        interval_param = request.args.get("interval", "W").upper()
+        # Map 'week'/'month' strings to Pandas frequency aliases if needed, or just strict check
+        freq_alias = "ME" if interval_param == "M" else "W"
+        # Note: Pandas 2.2+ prefers 'ME' (Month End) over 'M'. Use 'M' if on older pandas.
+
+        with conn.cursor() as cur:
+            # Union Query: Get both closed history and current active
+            query = """
+                SELECT h.started_at, h.ended_at
+                FROM sponsorship_history h
+                WHERE h.sponsored_id = %s
+                UNION ALL
+                SELECT s.created_at as started_at, NULL as ended_at
+                FROM sponsorship s
+                WHERE s.sponsored_id = %s
+            """
+            cur.execute(query, (user_id, user_id))
+            rows = cur.fetchall()
+
+        if not rows:
+            return jsonify([]), 200
+
+        # --- DATA PROCESSING WITH PANDAS ---
+        # Convert to DataFrame
+        df = pd.DataFrame(rows, columns=["started_at", "ended_at"])
+        df["started_at"] = pd.to_datetime(df["started_at"])
+        df["ended_at"] = pd.to_datetime(df["ended_at"])
+
+        # 2. Resample using the dynamic frequency
+        new_sponsors = df.set_index("started_at").resample(freq_alias).size()
+        lost_sponsors = (
+            df[df["ended_at"].notnull()]
+            .set_index("ended_at")
+            .resample(freq_alias)
+            .size()
+        )
+
+        # 3. Combine into one Timeline
+        timeline = pd.DataFrame({"new": new_sponsors, "lost": lost_sponsors}).fillna(0)
+
+        # 4. Calculate "Active Count" (Running Total)
+        # Net change per week = New - Lost
+        timeline["net_change"] = timeline["new"] - timeline["lost"]
+        timeline["active_count"] = timeline["net_change"].cumsum()
+
+        # 5. Format for JSON
+        results = []
+        for date, row in timeline.iterrows():
+            results.append(
+                {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "active_count": int(
+                        max(0, row["active_count"])
+                    ),  # Ensure no negatives
+                    "new": int(row["new"]),
+                    "lost": int(row["lost"]),
+                }
+            )
+        return jsonify(results), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
