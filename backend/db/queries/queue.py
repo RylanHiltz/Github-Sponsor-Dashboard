@@ -55,7 +55,7 @@ def batchAddQueue(github_ids, priority, db):
             ON CONFLICT (github_id) DO UPDATE
             SET priority = GREATEST(queue.priority, EXCLUDED.priority),
                 status = CASE 
-                    WHEN queue.status = 'completed' OR queue.status = 'failed' 
+                    WHEN queue.status = 'failed' 
                     THEN 'pending' 
                     ELSE queue.status 
                 END
