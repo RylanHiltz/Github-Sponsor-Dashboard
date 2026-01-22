@@ -330,8 +330,13 @@ def get_sponsorship_history_route(user_id):
         # --- DATA PROCESSING WITH PANDAS ---
         # Convert to DataFrame
         df = pd.DataFrame(rows, columns=["started_at", "ended_at"])
-        df["started_at"] = pd.to_datetime(df["started_at"])
-        df["ended_at"] = pd.to_datetime(df["ended_at"])
+
+        # FIX: Force UTC, then strip timezone info (.dt.tz_localize(None))
+        # This ensures both columns are "timezone-naive" and can be joined/merged safely.
+        df["started_at"] = pd.to_datetime(df["started_at"], utc=True).dt.tz_localize(
+            None
+        )
+        df["ended_at"] = pd.to_datetime(df["ended_at"], utc=True).dt.tz_localize(None)
 
         # 2. Resample using the dynamic frequency
         new_sponsors = df.set_index("started_at").resample(freq_alias).size()
