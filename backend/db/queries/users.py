@@ -401,9 +401,20 @@ def getLocation(location):
         res = requests.get(url=url, headers=headers)
         if res.status_code == 200:
             data = res.json()
-            if data and "address" in data[0] and "country" in data[0]["address"]:
-                country = getLocationByImportance(data)
-                return country
+
+            # Check if we got a valid response structure
+            if data and "address" in data[0]:
+                address = data[0]["address"]
+
+                # Case 1: Standard Country found
+                if "country" in address:
+                    country = getLocationByImportance(data)
+                    return country
+
+                # Case 2: It's a continent
+                elif "continent" in address:
+                    # This may change in the future, but for now return none
+                    return None
             else:
                 logging.warning(f"No location data found for '{location}'.")
                 return None
