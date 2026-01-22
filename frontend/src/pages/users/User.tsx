@@ -2,10 +2,10 @@ import React, { useEffect, useMemo } from 'react' // Import useMemo
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import styles from "./User.module.css"
-import { Button, Skeleton, theme, Segmented } from 'antd' // Import Segmented
+import { Button, Skeleton, theme, Segmented, Tooltip as AntTooltip } from 'antd'
 import { apiUrl } from '../../api'
 import { Line } from 'react-chartjs-2';
-import { IoChevronBackOutline } from "react-icons/io5";
+import { IoChevronBackOutline, IoInformationCircleOutline } from "react-icons/io5"; // Added Info Icon
 
 import type { UserModel, YearlyActivityData } from '../../types/UserModel'
 import type { ChartData, ChartOptions } from 'chart.js';
@@ -17,7 +17,7 @@ import {
     PointElement,
     LineElement,
     Title,
-    Tooltip,
+    Tooltip as ChartTooltip,
     Legend,
     Filler,
 } from 'chart.js';
@@ -28,7 +28,7 @@ ChartJS.register(
     PointElement,
     LineElement,
     Title,
-    Tooltip,
+    ChartTooltip,
     Legend,
     Filler
 );
@@ -42,13 +42,13 @@ const User: React.FC = () => {
     const [user, setUser] = useState<UserModel>();
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [viewMode, setViewMode] = useState<ViewMode>('Activity');
-    const [historyInterval, setHistoryInterval] = useState<'W' | 'M'>('W'); // New State
-    const [sponsorshipHistory, setSponsorshipHistory] = useState<any[]>([]); // Store API data
+    const [historyInterval, setHistoryInterval] = useState<'W' | 'M'>('W');     // New State
+    const [sponsorshipHistory, setSponsorshipHistory] = useState<any[]>([]);    // Store API data
     const navigate = useNavigate();
 
     // -- CHART DATA LOGIC --
 
-    // 1. Calculate Activity Data (Existing Logic, wrapped in useMemo)
+    // Calculate Activity Data
     const activityChartData: ChartData<'line'> = useMemo(() => {
         if (!user || !user.yearly_activity_data) return { labels: [], datasets: [] };
 
@@ -111,7 +111,7 @@ const User: React.FC = () => {
         };
     }, [user]);
 
-    // 2. Calculate Sponsorship Data (Placeholder logic until backend sends history)
+    // Calculate Sponsorship Data (Placeholder logic until backend sends history)
     const sponsorshipChartData: ChartData<'line'> = useMemo(() => {
         if (!sponsorshipHistory || sponsorshipHistory.length === 0) return { labels: [], datasets: [] };
 
@@ -132,7 +132,7 @@ const User: React.FC = () => {
     // Choose which data to display
     const currentChartData = viewMode === 'Activity' ? activityChartData : sponsorshipChartData;
 
-    const chartOptions: ChartOptions<'line'> = {
+    const chartOptions: ChartOptions<'line'> = useMemo(() => ({
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -154,7 +154,37 @@ const User: React.FC = () => {
             x: {
                 display: true,
                 grid: { color: token.gridColor },
-                ticks: { color: '#9ca3af' },
+                ticks: {
+                    color: '#9ca3af',
+                    maxTicksLimit: 8,
+                    maxRotation: 0,
+                    callback: function (value, _index, _values) {
+                        const label = this.getLabelForValue(value as number);
+
+                        // If in Activity Mode, just return the Year (e.g., "2024")
+                        if (viewMode === 'Activity') return label;
+
+                        const date = new Date(label);
+                        if (isNaN(date.getTime())) return label;
+
+                        // DYNAMIC FORMATTING LOGIC
+                        if (historyInterval === 'W') {
+                            // Weekly: Show Month + Day (e.g., "Jan 12")
+                            return date.toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                timeZone: 'UTC'
+                            });
+                        } else {
+                            // Monthly: Show Month + Year (e.g., "Jan 2026")
+                            return date.toLocaleDateString('en-US', {
+                                month: 'short',
+                                year: 'numeric',
+                                timeZone: 'UTC'
+                            });
+                        }
+                    }
+                },
             },
             y: {
                 beginAtZero: true,
@@ -162,7 +192,7 @@ const User: React.FC = () => {
                 ticks: { color: '#9ca3af' },
             },
         },
-    };
+    }), [token, historyInterval, viewMode]);
 
     if (!id) return null;
 
@@ -192,6 +222,7 @@ const User: React.FC = () => {
                 const res = await fetch(`${apiUrl}/user/${id}/sponsorship-history?interval=${historyInterval}`);
                 const data = await res.json();
                 setSponsorshipHistory(data);
+                console.log(data)
             } catch (e) {
                 console.error(e);
             }
@@ -277,7 +308,7 @@ const User: React.FC = () => {
                                     className='font-semibold border-opacity-50 hover:border-opacity-100'
                                     type='primary'
                                     ghost
-                                    href={user?.profile_url} // filepath: /Users/rylanhiltz/Developer/mini-computer-vm/Github-Sponsor-Dashboard-ICSE-2026/frontend/src/pages/users/User.tsx
+                                    href={user?.profile_url}
                                     target='_blank'
                                 >
                                     Visit Profile
@@ -287,7 +318,6 @@ const User: React.FC = () => {
 
                         {/* RIGHT COLUMN: STATS CARD (Unchanged) */}
                         <div className={`${styles.profileCard} row-span-2 flex flex-col min-h-0 p-6`} style={{ borderColor: token.colorBorder }}>
-                            {/* ... existing stats content ... */}
                             <div className="flex flex-col flex-1 gap-4 xl:gap-5 pr-2 overflow-y-hidden">
                                 {(() => {
                                     const StatRow = ({ label, value, format }: { label: string, value: any, format?: 'currency' | 'date' | 'number' }) => {
@@ -332,9 +362,9 @@ const User: React.FC = () => {
                                                 <h2 className="text-base xl:text-lg font-semibold mb-1 xl:mb-2">Sponsorships</h2>
                                                 <div className="rounded-lg pl-2 2xl:pl-4">
                                                     <StatRow label="Sponsors" value={user?.total_sponsors} />
+                                                    <StatRow label="Private Sponsors" value={user?.private_sponsor_count} />
                                                     <StatRow label="Sponsoring" value={user?.total_sponsoring} />
                                                     <StatRow label="Minimum Tier" value={user?.min_sponsor_cost} format="currency" />
-                                                    <StatRow label="Est. Min Earnings" value={null} format="currency" />
                                                 </div>
                                             </div>
                                             {/* ... Account Data Group ... */}
@@ -353,18 +383,33 @@ const User: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* BOTTOM LEFT: CHART CARD */}
                         <div className={`${styles.profileCard} row-span-1 flex flex-col min-h-0 gap-5 p-5`} style={{ borderColor: token.colorBorder }}>
                             <div className='flex justify-between items-center'>
                                 <div className="flex gap-4 items-center">
-                                    <h2 className="text-xl font-semibold">
-                                        {viewMode === 'Activity' ? 'Visualized User Activity' : 'Sponsorship Growth'}
-                                    </h2>
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-xl font-semibold">
+                                            {viewMode === 'Activity' ? 'Visualized User Activity' : 'Sponsorship Growth'}
+                                        </h2>
+
+                                        {viewMode === 'Sponsorships' && (
+                                            <AntTooltip
+                                                title={
+                                                    <span>
+                                                        This chart tracks public sponsor data over time.
+                                                        Total counts may differ from current totals because <span className="font-bold text-[#10B981]">private (anonymous) sponsors</span> cannot be plotted on a timeline.
+                                                    </span>
+                                                }
+                                            >
+                                                <div className="text-gray-400 hover:text-[#10B981] transition-colors duration-200 cursor-help flex items-center justify-center h-[32px]">
+                                                    <IoInformationCircleOutline size={24} />
+                                                </div>
+                                            </AntTooltip>
+                                        )}
+                                    </div>
 
                                     {/* Show Time Toggle ONLY when looking at Sponsorships */}
                                     {viewMode === 'Sponsorships' && (
                                         <Segmented
-                                            size="small"
                                             options={[
                                                 { label: 'Weekly', value: 'W' },
                                                 { label: 'Monthly', value: 'M' }
