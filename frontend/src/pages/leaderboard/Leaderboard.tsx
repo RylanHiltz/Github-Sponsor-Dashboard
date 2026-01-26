@@ -1,20 +1,39 @@
 import React, { useEffect, useState, useRef, useLayoutEffect, useContext } from 'react'
 import styles from './Leaderboard.module.css'
-import { Table, Pagination, Button } from 'antd';
+import { Table, Pagination, Button, Modal, Checkbox, message, Row, Col, InputNumber, Divider, theme } from 'antd'; // Added Divider
 import { useNavigate } from 'react-router';
 import { apiUrl } from '../../api';
 import { createStyles } from 'antd-style';
 import Carousel from '../../components/Carousel';
 import { SearchContext } from '../../context/SearchContext';
-import { MdClear } from "react-icons/md";
-import { useDebounce } from '../../hooks/debounce'; // Import the new hook
+import { MdClear, MdFileDownload } from "react-icons/md"; // Added MdFileDownload
+import { useDebounce } from '../../hooks/debounce';
 
-// Type imports 
-import type { TableProps, TablePaginationConfig } from 'antd';
+import type { TableProps, TablePaginationConfig, GetProp } from 'antd';
 import type { LeaderboardUser, Location, LeaderboardStatsData } from '../../types/LeaderboardUserModel';
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterValue, SortOrder } from 'antd/es/table/interface';
 
+
+type CheckboxValueType = GetProp<typeof Checkbox.Group, 'value'>[number];
+
+// Map display names to API keys
+const EXPORT_OPTIONS = [
+    { label: 'Username', value: 'username' },
+    { label: 'Name', value: 'name' },
+    { label: 'Type', value: 'type' },
+    { label: 'Gender', value: 'gender' },
+    { label: 'Location', value: 'location' },
+    { label: 'Followers', value: 'followers' },
+    { label: 'Following', value: 'following' },
+    { label: 'Public Repos', value: 'public_repos' },
+    { label: 'Total Sponsors', value: 'total_sponsors' },
+    { label: 'Total Sponsoring', value: 'total_sponsoring' },
+    { label: 'Est. Earnings', value: 'estimated_earnings' },
+    { label: 'Email', value: 'email' },
+    { label: 'Twitter', value: 'twitter_username' },
+    { label: 'Website', value: 'profile_url' },
+];
 
 const useStyle = createStyles(({ css, prefixCls }) => {
     return {
@@ -41,6 +60,8 @@ const useStyle = createStyles(({ css, prefixCls }) => {
 });
 
 const Leaderboard: React.FC = () => {
+
+    const { token } = theme.useToken();
 
     // Navigation handle for user pages
     const navigate = useNavigate();
@@ -71,11 +92,105 @@ const Leaderboard: React.FC = () => {
     const [filters, setFilters] = useState<Record<string, FilterValue | null>>({});
     const [sorters, setSorters] = useState<Record<string, SortOrder | null>>({});
 
+    // -- EXPORT STATE --
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportLoading, setExportLoading] = useState(false);
+    const [selectedExportCols, setSelectedExportCols] = useState<CheckboxValueType[]>(['username', 'name', 'type', 'total_sponsors']);
+    const [exportStartRow, setExportStartRow] = useState<number>(1);
+    const [exportLimit, setExportLimit] = useState<number>(1000);
+    // ------------------
+
     const handleClearFilters = () => {
         setFilters({});
-        setSorters({});
+        setSorters({}); // Reset to unfiltered state (backend will handle default order)
         setSearchTerm('');
         setPagination(prev => ({ ...prev, current: 1 }));
+    };
+
+    // New function to handle data export
+    const handleExport = async () => {
+        if (selectedExportCols.length === 0) {
+            message.warning("Please select at least one column to export.");
+            return;
+        }
+
+        setExportLoading(true);
+
+        // 1. Construct query params for the dedicated export endpoint
+        const queryParams = new URLSearchParams({
+            start_row: exportStartRow.toString(),
+            count: exportLimit.toString(),
+        });
+
+        if (searchTerm) {
+            queryParams.append("search", searchTerm);
+        }
+
+        Object.entries(filters).forEach(([key, value]) => {
+            if (value && Array.isArray(value) && value.length > 0) {
+                (value as string[]).forEach(v => queryParams.append(key, v));
+            }
+        });
+
+        Object.entries(sorters).forEach(([field, order]) => {
+            if (order) {
+                queryParams.append("sortField", field);
+                queryParams.append("sortOrder", order);
+            }
+        });
+
+        try {
+            // 2. Fetch Data from Export Endpoint
+            const response = await fetch(`${apiUrl}/users/export?${queryParams.toString()}`);
+            if (!response.ok) {
+                // Handle rate limit specifically
+                if (response.status === 429) {
+                    throw new Error("Daily export limit reached.");
+                }
+                throw new Error('Export request failed');
+            }
+            const data = await response.json();
+            const usersToExport = data.users || [];
+
+            if (usersToExport.length === 0) {
+                message.info("No users match the current filters to export.");
+                setExportLoading(false);
+                return;
+            }
+
+            // 3. Convert to CSV
+            const headers = selectedExportCols.map(col => String(col)).join(",");
+            const csvRows = usersToExport.map((user: any) => {
+                return selectedExportCols.map(col => {
+                    const val = user[col as string];
+                    if (val === null || val === undefined) return '';
+                    // Escape quotes and wrap in quotes to handle commas in data
+                    const stringVal = String(val).replace(/"/g, '""');
+                    return `"${stringVal}"`;
+                }).join(",");
+            });
+
+            const csvContent = [headers, ...csvRows].join("\n");
+
+            // 4. Trigger Download
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `github_sponsors_export_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            message.success(`Allocated ${usersToExport.length} rows for export.`);
+            setIsExportModalOpen(false);
+
+        } catch (error) {
+            console.error("Export error:", error);
+            message.error("Failed to export data.");
+        } finally {
+            setExportLoading(false);
+        }
     };
 
     const fetchUsers = async (
@@ -424,8 +539,20 @@ const Leaderboard: React.FC = () => {
                         />
                     </div>
                     <div className='flex-shrink-0 flex justify-end pt-2'>
-                        <div className='flex w-full justify-between'>
-                            <Button icon={<MdClear />} iconPosition='end' onClick={handleClearFilters}>Clear Filters</Button>
+                        <div className='flex w-full justify-between items-center'>
+                            {/* Group Filters and Export button */}
+                            <div className='flex gap-2'>
+                                <Button icon={<MdClear />} iconPosition='end' onClick={handleClearFilters}>
+                                    Clear Filters
+                                </Button>
+                                <Button
+                                    icon={<MdFileDownload />}
+                                    onClick={() => setIsExportModalOpen(true)}
+                                >
+                                    Export CSV
+                                </Button>
+                            </div>
+
                             <Pagination
                                 simple
                                 current={pagination.current}
@@ -445,6 +572,90 @@ const Leaderboard: React.FC = () => {
                     </div>
                 </div>
             </section >
+
+            {/* Export Modal */}
+            <Modal
+                title="Export Data"
+                open={isExportModalOpen}
+                onOk={handleExport}
+                onCancel={() => setIsExportModalOpen(false)}
+                okText={exportLoading ? "Exporting..." : "Download CSV"}
+                confirmLoading={exportLoading}
+                centered
+                width={550} // Increased width slightly
+            >
+                <p className="text-gray-500 mb-6">
+                    Export user data to CSV based on your active filters and search terms.
+                </p>
+
+                <div className='flex flex-col gap-1'>
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <p className="font-semibold">1. Select Columns</p>
+                            <Checkbox
+                                indeterminate={selectedExportCols.length > 0 && selectedExportCols.length < EXPORT_OPTIONS.length}
+                                onChange={(e) => setSelectedExportCols(e.target.checked ? EXPORT_OPTIONS.map(opt => opt.value) : [])}
+                                checked={selectedExportCols.length === EXPORT_OPTIONS.length}
+                            >
+                                Select All
+                            </Checkbox>
+                        </div>
+                        <div className={`p-4 rounded-lg border`} style={{ borderColor: token.colorBorder }}>
+                            <Checkbox.Group
+                                style={{ width: '100%' }}
+                                value={selectedExportCols}
+                                onChange={(checkedValues) => setSelectedExportCols(checkedValues as CheckboxValueType[])}
+                            >
+                                <Row gutter={[12, 12]}>
+                                    {EXPORT_OPTIONS.map((opt) => (
+                                        <Col span={12} key={opt.value}>
+                                            <Checkbox value={opt.value}>{opt.label}</Checkbox>
+                                        </Col>
+                                    ))}
+                                </Row>
+                            </Checkbox.Group>
+                        </div>
+                    </div>
+
+                    <Divider style={{ margin: '24px 0' }} />
+
+                    <div>
+                        <p className="mb-4 font-semibold">2. Range Configuration</p>
+                        <Row gutter={16}>
+                            <Col span={12}>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium mb-1">Starting Row</span>
+                                    <InputNumber
+                                        min={1}
+                                        value={exportStartRow}
+                                        onChange={(val) => setExportStartRow(val || 1)}
+                                        style={{ width: '100%' }}
+                                    />
+                                    <span className="text-xs text-gray-400 mt-1">
+                                        Row number to start export from. If 100, exports 100 and up.
+                                    </span>
+                                </div>
+                            </Col>
+                            <Col span={12}>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium mb-1">Quantity to Export</span>
+                                    <InputNumber
+                                        min={1}
+                                        max={2000}
+                                        value={exportLimit}
+                                        onChange={(val) => setExportLimit(val || 1000)}
+                                        style={{ width: '100%' }}
+                                        addonAfter="rows"
+                                    />
+                                    <span className="text-xs text-gray-400 mt-1">
+                                        Maximum 2000 rows per export
+                                    </span>
+                                </div>
+                            </Col>
+                        </Row>
+                    </div>
+                </div>
+            </Modal >
         </>
     )
 }

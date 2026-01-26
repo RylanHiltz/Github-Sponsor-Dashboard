@@ -3,25 +3,23 @@ from flask import Blueprint, jsonify, request
 from psycopg2.extras import RealDictCursor
 import json
 import pandas as pd
+from datetime import date
 
 # Endpoint for Users
 users_bp = Blueprint("users", __name__)
 
+# Simple in-memory storage for rate limiting exports (IP -> {date, count})
+daily_export_counts = {}
 
-# Fetch all users from the database
-@users_bp.route("/api/users", methods=["GET"])
-def get_users():
 
-    # Establish connection to database
+def _execute_user_query(request_args, limit, offset):
+    """
+    Shared helper to build and execute the user search/filter query.
+    """
     conn = db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        # Get pagination parameters from query string, with defaults
-        page = int(request.args.get("page", 1))
-        per_page = int(request.args.get("per_page", 10))
-        offset = (page - 1) * per_page
-        # Search field passed in from the frontend to preform database search
         search_query = request.args.get("search", "")
         # Filters passed in from the frontend to query the user data
         filters = {
@@ -29,7 +27,6 @@ def get_users():
             "type": request.args.getlist("type"),
             "location": request.args.getlist("location"),
         }
-        # Sorters passed in from the frontend to sort user data
         sort_fields = request.args.getlist("sortField")
         sort_orders = request.args.getlist("sortOrder")
 
@@ -68,10 +65,9 @@ def get_users():
         # Handle filters (build explicit placeholders for IN-lists)
         for key, values in filters.items():
             if key not in allowed_filters:
-                continue  # ignore unexpected filter keys
+                continue
             if not values:
                 continue
-            # treat string "None" as a request for NULL values
             if "None" in values:
                 values = [v for v in values if v != "None"]
                 if values:
@@ -99,14 +95,16 @@ def get_users():
                 if col_name:
                     direction = "DESC" if order == "descend" else "ASC"
                     order_parts.append(f"{col_name} {direction}")
+        else:
+            # Default sort logic: Show leaderboard (Sponsors DESC) if no specific sort requested
+            order_parts.append("total_sponsors DESC")
 
         # Always add id as the final tiebreaker for stable pagination
         order_parts.append("u.id ASC")
         order_clause = "ORDER BY " + ", ".join(order_parts)
 
-        # Optizimed query to fetch all necessary data, while handling filtering and searching via the backend
+        # Optizimed query to fetch all necessary data
         data_query = f"""
-        -- Handles counting bi-directional sponsorships for each user who is enriched
         WITH sponsorship_counts AS (
             SELECT 
             u.id AS user_id,
@@ -121,16 +119,12 @@ def get_users():
             LEFT JOIN sponsorship s1 ON s1.sponsored_id = u.id
             GROUP BY u.id, u.private_sponsor_count
         ),
-        
-        -- Grabs the median minimum sponsorship cost from the users table for calculation of estimated earnings 
         median_cost AS (
             SELECT 
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY min_sponsor_cost) AS value
             FROM users
             WHERE min_sponsor_cost > 0
         )
-        
-        -- Selects all attributes to be displayed in the leaderboard from the users table
         SELECT 
             u.id, u.name, u.username, u.type, u.avatar_url, u.profile_url,
             u.gender, u.location, u.public_repos, u.public_gists,
@@ -138,10 +132,6 @@ def get_users():
             sc.total_sponsors,
             sc.total_sponsoring,
             ( 
-            
-            -- Checks if the users minimum sponsorship price is greater than 0, if so use that value, else use median
-            -- If the users minimum sponsorship price is greater than the median, the median is substituted for the price
-            -- This is multiplied by the total # of sponsors to get the estimated MINIMUM monthly earnings the user earns
             LEAST(
                 (CASE WHEN u.min_sponsor_cost > 0 THEN u.min_sponsor_cost ELSE mc.value END), 
                 mc.value
@@ -157,14 +147,13 @@ def get_users():
         """
 
         # Inject request params + order params + pagination params
-        final_params = params + order_params + [per_page, offset]
+        final_params = params + order_params + [limit, offset]
         cur.execute(data_query, tuple(final_params))
         rows = cur.fetchall()
 
         total_count = 0
         ordered_users = []
         if rows:
-            # The total_count is the same for every row, so we can grab it from the first one.
             total_count = rows[0]["total_count"]
             for row in rows:
                 ordered_users.append(
@@ -188,11 +177,44 @@ def get_users():
                         "estimated_earnings": row["estimated_earnings"],
                     }
                 )
-        response_data = {
-            "total": total_count,
-            "users": ordered_users,
-        }
-        return jsonify(response_data), 200
+
+        return {"total": total_count, "users": ordered_users}
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# Fetch all users from the database (Standard Pagination)
+@users_bp.route("/api/users", methods=["GET"])
+def get_users():
+    try:
+        # Get pagination parameters from query string
+        page = int(request.args.get("page", 1))
+        per_page = int(request.args.get("per_page", 10))
+        offset = (page - 1) * per_page
+
+        result = _execute_user_query(request.args, per_page, offset)
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Export users (Dedicated endpoint with start_row and rate limiting)
+@users_bp.route("/api/users/export", methods=["GET"])
+def get_export_users():
+    try:
+        # 2. Offset Calculation
+        start_row = request.args.get("start_row", default=1, type=int)
+        count = request.args.get("count", default=1000, type=int)
+
+        # Ensure sensible limits (Strictly enforce 2000 max to match frontend)
+        count = min(count, 2000)
+        offset = max(0, start_row - 1)
+
+        result = _execute_user_query(request.args, count, offset)
+        return jsonify(result), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

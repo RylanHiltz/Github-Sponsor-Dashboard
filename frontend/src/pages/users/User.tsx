@@ -117,15 +117,36 @@ const User: React.FC = () => {
 
         return {
             labels: sponsorshipHistory.map((d: any) => d.date),
-            datasets: [{
-                label: 'Active Sponsors',
-                data: sponsorshipHistory.map((d: any) => d.active_count),
-                borderColor: '#10B981',
-                backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                fill: true,
-                tension: 0.4,
-                pointRadius: 4,
-            }]
+            datasets: [
+                {
+                    label: 'Active Sponsors',
+                    data: sponsorshipHistory.map((d: any) => d.active_count),
+                    borderColor: '#10B981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                },
+                {
+                    label: 'New Sponsors',
+                    data: sponsorshipHistory.map((d: any) => d.new),
+                    borderColor: '#3b82f6', // Blue
+                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 2,
+                },
+                {
+                    label: 'Lost Sponsors',
+                    data: sponsorshipHistory.map((d: any) => d.lost),
+                    borderColor: '#ef4444', // Red
+                    backgroundColor: 'rgba(239, 68, 68, 0.5)',
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 2,
+                }
+            ]
         };
     }, [sponsorshipHistory]);
 
