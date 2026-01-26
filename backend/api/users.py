@@ -49,8 +49,9 @@ def get_users():
         allowed_filters = {"gender", "type", "location"}
 
         where_clauses = []
-        order_clause = []
+        order_parts = []
         params = []
+        order_params = []
 
         # Handle search query (parameterized)
         if search_query:
@@ -58,6 +59,11 @@ def get_users():
                 "to_tsvector('english', u.username || ' ' || u.name) @@ plainto_tsquery('english', %s)"
             )
             params.append(search_query)
+
+            # Re-add search ranking to the front of the order list
+            search_rank_expression = "ts_rank_cd(to_tsvector('english', u.username || ' ' || u.name), plainto_tsquery('english', %s))"
+            order_parts.append(f"{search_rank_expression} DESC")
+            order_params.append(search_query)
 
         # Handle filters (build explicit placeholders for IN-lists)
         for key, values in filters.items():
@@ -86,28 +92,17 @@ def get_users():
         where_clauses.append("(sc.total_sponsors > 0 OR sc.total_sponsoring > 0)")
         where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        # Build ORDER BY using only whitelisted mapping (safe to inject column names from mapping)
-        order_by_parts = []
-        for i, field in enumerate(sort_fields):
-            if field in sortable_fields:
-                col_name = sortable_fields[field]
-                order = (
-                    "ASC"
-                    if (i < len(sort_orders) and sort_orders[i] == "ascend")
-                    else "DESC"
-                )
-                order_by_parts.append(f"{col_name} {order}")
+        # Build ORDER BY clause
+        if sort_fields and sort_orders:
+            for field, order in zip(sort_fields, sort_orders):
+                col_name = sortable_fields.get(field)
+                if col_name:
+                    direction = "DESC" if order == "descend" else "ASC"
+                    order_parts.append(f"{col_name} {direction}")
 
-        if search_query:
-            search_rank_expression = "ts_rank_cd(to_tsvector('english', u.username || ' ' || u.name), plainto_tsquery('english', %s))"
-            order_by_parts.insert(0, f"{search_rank_expression} DESC")
-            params.append(search_query)
-
-        order_clause = (
-            f"ORDER BY {', '.join(order_by_parts)}"
-            if order_by_parts
-            else "ORDER BY sc.total_sponsors DESC"
-        )
+        # Always add id as the final tiebreaker for stable pagination
+        order_parts.append("u.id ASC")
+        order_clause = "ORDER BY " + ", ".join(order_parts)
 
         # Optizimed query to fetch all necessary data, while handling filtering and searching via the backend
         data_query = f"""
@@ -161,7 +156,8 @@ def get_users():
         LIMIT %s OFFSET %s;
         """
 
-        final_params = params + [per_page, offset]
+        # Inject request params + order params + pagination params
+        final_params = params + order_params + [per_page, offset]
         cur.execute(data_query, tuple(final_params))
         rows = cur.fetchall()
 
@@ -356,18 +352,25 @@ def get_sponsorship_history_route(user_id):
         timeline["active_count"] = timeline["net_change"].cumsum()
 
         # 5. Format for JSON
-        results = []
-        for date, row in timeline.iterrows():
-            results.append(
-                {
-                    "date": date.strftime("%Y-%m-%d"),
-                    "active_count": int(
-                        max(0, row["active_count"])
-                    ),  # Ensure no negatives
-                    "new": int(row["new"]),
-                    "lost": int(row["lost"]),
-                }
-            )
+        # Explicitly format the index to avoid Pylance inference errors with .dt accessor
+        timeline.index = pd.to_datetime(timeline.index).strftime("%Y-%m-%d")
+
+        # Reset index (which is now strings) to make 'date' a column
+        final_df = timeline.reset_index()
+
+        # Rename the first column (the index) to 'date' safely
+        final_df.rename(columns={final_df.columns[0]: "date"}, inplace=True)
+
+        # Ensure integers and handle negatives (vectorized clip)
+        final_df["active_count"] = final_df["active_count"].clip(lower=0).astype(int)
+        final_df["new"] = final_df["new"].astype(int)
+        final_df["lost"] = final_df["lost"].astype(int)
+
+        # Convert to list of dictionaries directly
+        results = final_df[["date", "active_count", "new", "lost"]].to_dict(
+            orient="records"
+        )
+
         return jsonify(results), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -31,6 +31,12 @@ URL = "https://api.github.com/graphql"
 def createUser(github_id: int, db):
 
     user = getUserData(github_id, db)
+
+    # Check if user is None before proceeding
+    if user is None:
+        logging.error(f"Cannot create user {github_id}: No data returned.")
+        return None, None
+
     print(user)
 
     with db.cursor() as cur:
@@ -323,6 +329,11 @@ def getGithubData(github_id: int, db):
     try:
         rest_url = f"https://api.github.com/user/{github_id}"
         response = getRequest(url=rest_url)
+
+        # Ensure response is a Response object to satisfy Pylance type checker
+        if not isinstance(response, requests.Response):
+            raise ValueError(f"Expected requests.Response, got {type(response)}")
+
         response.raise_for_status()
         return response.json()
 
@@ -508,9 +519,16 @@ def getGender(name, country):
         ],
     )
     output = res.choices[0].message.content
-    user = json.loads(output)
-    gender = user["gender"]
-    return gender
+
+    if not output:
+        return "Unknown"
+
+    try:
+        user = json.loads(output)
+        gender = user.get("gender", "Unknown")
+        return gender
+    except json.JSONDecodeError:
+        return "Unknown"
 
 
 # Runs a check if the user exists in the database an has already been visisted once
