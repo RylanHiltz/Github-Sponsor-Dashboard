@@ -1,4 +1,4 @@
-# ICSE-2026: Tool Documentation: A Priority-Based Traversal Tool for GitHub Sponsorship Data
+# FSE'26: Tool Documentation: A Priority-Based Traversal Tool for GitHub Sponsorship Data
 
 ![github sponsorship dashboard preview](images/github-dashboard.png)
 
