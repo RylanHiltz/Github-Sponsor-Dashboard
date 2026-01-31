@@ -31,7 +31,8 @@ def _execute_user_query(request_args, limit, offset):
         sort_orders = request.args.getlist("sortOrder")
 
         # Data dictionary of sortable columns in the user data
-        sortable_fields = {
+        # keys mapped to actual DB columns
+        sortable_fields_map = {
             "username": "u.username",
             "name": "u.name",
             "followers": "u.followers",
@@ -48,7 +49,14 @@ def _execute_user_query(request_args, limit, offset):
         where_clauses = []
         order_parts = []
         params = []
-        order_params = []
+
+        # Check if we are sorting by a calculated field
+        calculated_fields = {"total_sponsors", "total_sponsoring", "estimated_earnings"}
+        is_calculated_sort = any(field in calculated_fields for field in sort_fields)
+
+        # Default sort is total_sponsors (calculated), so if no sort provided, treat as calculated
+        if not sort_fields:
+            is_calculated_sort = True
 
         # Handle search query (parameterized)
         if search_query:
@@ -57,12 +65,13 @@ def _execute_user_query(request_args, limit, offset):
             )
             params.append(search_query)
 
-            # Re-add search ranking to the front of the order list
-            search_rank_expression = "ts_rank_cd(to_tsvector('english', u.username || ' ' || u.name), plainto_tsquery('english', %s))"
-            order_parts.append(f"{search_rank_expression} DESC")
-            order_params.append(search_query)
+            # If searching, we often prioritize rank, which is dynamic, but lets stick to logic
+            if not sort_fields:
+                # If search exists but no sort specified, usually we sort by rank (native-ish)
+                # But existing logic forced total_sponsors. Let's keep existing logic structure roughly.
+                pass
 
-        # Handle filters (build explicit placeholders for IN-lists)
+        # Handle filters
         for key, values in filters.items():
             if key not in allowed_filters:
                 continue
@@ -83,100 +92,215 @@ def _execute_user_query(request_args, limit, offset):
                 where_clauses.append(f"u.{key} IN ({placeholders})")
                 params.extend(values)
 
-        # Always require enriched users with sponsor activity
+        # Always require enriched users
         where_clauses.append("u.is_enriched IS TRUE")
-        where_clauses.append("(sc.total_sponsors > 0 OR sc.total_sponsoring > 0)")
-        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        # Build ORDER BY clause
+        # Build ORDER BY clause parts
         if sort_fields and sort_orders:
             for field, order in zip(sort_fields, sort_orders):
-                col_name = sortable_fields.get(field)
+                col_name = sortable_fields_map.get(field)
                 if col_name:
                     direction = "DESC" if order == "descend" else "ASC"
-                    order_parts.append(f"{col_name} {direction}")
-        else:
-            # Default sort logic: Show leaderboard (Sponsors DESC) if no specific sort requested
-            order_parts.append("total_sponsors DESC")
 
-        # Always add id as the final tiebreaker for stable pagination
+                    # For search, we might want rank, but following existing pattern:
+                    if field not in calculated_fields:
+                        order_parts.append(f"{col_name} {direction}")
+                    else:
+                        order_parts.append(f"{field} {direction}")
+
+        # Tiebreaker
         order_parts.append("u.id ASC")
-        order_clause = "ORDER BY " + ", ".join(order_parts)
 
-        # Optizimed query to fetch all necessary data
-        data_query = f"""
-        WITH sponsorship_counts AS (
-            SELECT 
-            u.id AS user_id,
-            COALESCE(COUNT(DISTINCT s1.sponsor_id), 0) + 
-            COALESCE(u.private_sponsor_count, 0) AS total_sponsors,
-            COALESCE((
-                SELECT COUNT(DISTINCT s2.sponsored_id)
-                FROM sponsorship s2
-                WHERE s2.sponsor_id = u.id
-            ), 0) AS total_sponsoring
-            FROM users u
-            LEFT JOIN sponsorship s1 ON s1.sponsored_id = u.id
-            GROUP BY u.id, u.private_sponsor_count
-        ),
-        median_cost AS (
-            SELECT 
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY min_sponsor_cost) AS value
-            FROM users
-            WHERE min_sponsor_cost > 0
+        # Base WHERE for users table
+        base_where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        # The condition that requires joining sponsorship:
+        # (sc.total_sponsors > 0 OR sc.total_sponsoring > 0)
+        # We can rewrite this as EXISTS subqueries for the Native path.
+        exists_condition = """
+        (
+            COALESCE(u.private_sponsor_count, 0) > 0 
+            OR EXISTS (SELECT 1 FROM sponsorship s_check WHERE s_check.sponsored_id = u.id)
+            OR EXISTS (SELECT 1 FROM sponsorship s_check WHERE s_check.sponsor_id = u.id)
         )
-        SELECT 
-            u.id, u.name, u.username, u.type, u.avatar_url, u.profile_url,
-            u.gender, u.location, u.public_repos, u.public_gists,
-            u.followers, u.following, u.hireable, u.min_sponsor_cost, 
-            sc.total_sponsors,
-            sc.total_sponsoring,
-            ( 
-            LEAST(
-                (CASE WHEN u.min_sponsor_cost > 0 THEN u.min_sponsor_cost ELSE mc.value END), 
-                mc.value
-            ) * sc.total_sponsors
-            ) AS estimated_earnings,
-            COUNT(*) OVER() AS total_count
-            FROM users u
-            JOIN sponsorship_counts sc ON sc.user_id = u.id
-            CROSS JOIN median_cost mc
-            {where_clause}
-            {order_clause}
-        LIMIT %s OFFSET %s;
         """
 
-        # Inject request params + order params + pagination params
-        final_params = params + order_params + [limit, offset]
-        cur.execute(data_query, tuple(final_params))
+        if not is_calculated_sort:
+            # === FAST PATH: Native Column Sort (Name, Followers, etc) ===
+            # 1. Filter and Sort IDs on `users` table only
+            # 2. Limit/Offset
+            # 3. Join logic ONLY for the resulting subset
+
+            # Add strict search ordering if applicable
+            full_order_clause = "ORDER BY "
+            if search_query:
+                full_order_clause += f"ts_rank_cd(to_tsvector('english', u.username || ' ' || u.name), plainto_tsquery('english', %s)) DESC, "
+
+            full_order_clause += ", ".join(order_parts)
+
+            # NOTE: We need to inject search param again for the rank order if it exists
+            final_params = list(params)
+            if search_query:
+                # Add search param for the Rank Order clause
+                # params structure: [search_where, filters..., search_rank, limit, offset]
+                final_params.append(search_query)
+
+            # Combine WHERE
+            if base_where:
+                final_where = f"{base_where} AND {exists_condition}"
+            else:
+                final_where = f"WHERE {exists_condition}"
+
+            data_query = f"""
+            WITH median_cost AS (
+                SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY min_sponsor_cost) AS value
+                FROM users WHERE min_sponsor_cost > 0
+            ),
+            subset_users AS (
+                SELECT u.id, COUNT(*) OVER() as total_count
+                FROM users u
+                {final_where}
+                {full_order_clause}
+                LIMIT %s OFFSET %s
+            )
+            SELECT 
+                u.id, u.name, u.username, u.type, u.avatar_url, u.profile_url,
+                u.gender, u.location, u.public_repos, u.public_gists,
+                u.followers, u.following, u.hireable, u.min_sponsor_cost, 
+                -- Calculate counts purely for this page of users
+                (COALESCE(u.private_sponsor_count, 0) + 
+                 (SELECT COUNT(DISTINCT s1.sponsor_id) FROM sponsorship s1 WHERE s1.sponsored_id = u.id)
+                ) as total_sponsors,
+                (SELECT COUNT(DISTINCT s2.sponsored_id) FROM sponsorship s2 WHERE s2.sponsor_id = u.id) as total_sponsoring,
+                su.total_count
+            FROM subset_users su
+            JOIN users u ON u.id = su.id
+            CROSS JOIN median_cost mc
+            -- We need to re-apply order to ensure result set matches the CTE order
+            {full_order_clause}
+            """
+
+            # Add limit/offset to params
+            final_params.append(limit)
+            final_params.append(offset)
+
+            cur.execute(data_query, tuple(final_params))
+
+        else:
+            # === SLOW PATH: Calculated Column Sort (Total Sponsors, Earnings) ===
+            # Fallback to existing logic but Optimized:
+            # We push the base user filters INTO a specific user selection first
+            # to avoid joining sponsorship for users who don't match gender/location.
+
+            # Re-construct Order Clause for standard path
+            full_order_clause = "ORDER BY "
+            order_params_local = []
+            if search_query:
+                full_order_clause += f"ts_rank_cd(to_tsvector('english', u.username || ' ' || u.name), plainto_tsquery('english', %s)) DESC, "
+                order_params_local.append(search_query)
+
+            full_order_clause += ", ".join(order_parts)
+
+            # Add the complex filter for showing only active users
+            # This must be applied AFTER counts are known in the CTE strategy
+            # or we use the logic below.
+
+            # Optimized "Heavy" Query
+            data_query = f"""
+            WITH median_cost AS (
+                SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY min_sponsor_cost) AS value
+                FROM users WHERE min_sponsor_cost > 0
+            ),
+            sponsorship_counts AS (
+                SELECT 
+                    u.id,
+                    COALESCE(COUNT(DISTINCT s1.sponsor_id), 0) + COALESCE(u.private_sponsor_count, 0) AS total_sponsors,
+                    (SELECT COUNT(DISTINCT s2.sponsored_id) FROM sponsorship s2 WHERE s2.sponsor_id = u.id) AS total_sponsoring
+                FROM users u
+                LEFT JOIN sponsorship s1 ON s1.sponsored_id = u.id
+                {base_where} -- PUSH FILTERS DOWN: Only calculate for relevant users
+                GROUP BY u.id, u.private_sponsor_count
+            )
+            SELECT 
+                u.id, u.name, u.username, u.type, u.avatar_url, u.profile_url,
+                u.gender, u.location, u.public_repos, u.public_gists,
+                u.followers, u.following, u.hireable, u.min_sponsor_cost, 
+                sc.total_sponsors,
+                sc.total_sponsoring,
+                ( 
+                LEAST(
+                    (CASE WHEN u.min_sponsor_cost > 0 THEN u.min_sponsor_cost ELSE mc.value END), 
+                    mc.value
+                ) * sc.total_sponsors
+                ) AS estimated_earnings,
+                COUNT(*) OVER() AS total_count
+            FROM users u
+            JOIN sponsorship_counts sc ON sc.id = u.id
+            CROSS JOIN median_cost mc
+            WHERE (sc.total_sponsors > 0 OR sc.total_sponsoring > 0)
+            {full_order_clause}
+            LIMIT %s OFFSET %s;
+            """
+
+            # Params: [search?, filters..., search_param_for_rank?, limit, offset]
+            final_params = list(params)
+            final_params.extend(order_params_local)
+            final_params.append(limit)
+            final_params.append(offset)
+
+            cur.execute(data_query, tuple(final_params))
+
         rows = cur.fetchall()
 
         total_count = 0
         ordered_users = []
         if rows:
             total_count = rows[0]["total_count"]
-            for row in rows:
-                ordered_users.append(
-                    {
-                        "id": row["id"],
-                        "name": row["name"],
-                        "username": row["username"],
-                        "type": row["type"],
-                        "gender": row["gender"],
-                        "hireable": row["hireable"],
-                        "location": row["location"],
-                        "avatar_url": row["avatar_url"],
-                        "profile_url": row["profile_url"],
-                        "following": row["following"],
-                        "followers": row["followers"],
-                        "public_repos": row["public_repos"],
-                        "public_gists": row["public_gists"],
-                        "total_sponsors": row["total_sponsors"],
-                        "total_sponsoring": row["total_sponsoring"],
-                        "min_sponsor_cost": row["min_sponsor_cost"],
-                        "estimated_earnings": row["estimated_earnings"],
-                    }
+
+            # If estimated_earnings wasn't computed by the query (fast path),
+            # compute median once so we can calculate earnings in Python.
+            need_median = "estimated_earnings" not in rows[0]
+            median_value = None
+            if need_median:
+                cur.execute(
+                    "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY min_sponsor_cost) AS median "
+                    "FROM users WHERE min_sponsor_cost > 0"
                 )
+                mrow = cur.fetchone()
+                median_value = mrow["median"] if mrow else None
+
+            for row in rows:
+                est_earn = row.get("estimated_earnings")
+                if est_earn is None and "total_sponsors" in row:
+                    # compute a reasonable fallback using median and min_sponsor_cost
+                    ms_cost = row.get("min_sponsor_cost")
+                    effective_cost = (
+                        ms_cost if ms_cost and ms_cost > 0 else (median_value or 0)
+                    )
+                    if median_value is not None:
+                        effective_cost = min(effective_cost, median_value)
+                    est_earn = (effective_cost or 0) * (row.get("total_sponsors") or 0)
+                # Reconstruct Dict
+                user_obj = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "username": row["username"],
+                    "type": row["type"],
+                    "gender": row["gender"],
+                    "hireable": row["hireable"],
+                    "location": row["location"],
+                    "avatar_url": row["avatar_url"],
+                    "profile_url": row["profile_url"],
+                    "following": row["following"],
+                    "followers": row["followers"],
+                    "public_repos": row["public_repos"],
+                    "public_gists": row["public_gists"],
+                    "total_sponsors": row["total_sponsors"],
+                    "total_sponsoring": row["total_sponsoring"],
+                    "min_sponsor_cost": row["min_sponsor_cost"],
+                    "estimated_earnings": est_earn,
+                }
+                ordered_users.append(user_obj)
 
         return {"total": total_count, "users": ordered_users}
 
