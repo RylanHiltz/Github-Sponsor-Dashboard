@@ -4,6 +4,7 @@ import { ConfigProvider, theme as antdTheme, Spin } from 'antd';
 
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { theme as appTheme } from './theme.ts';
+import { usePageViews } from "./hooks/useAnalytics";
 
 import type { AliasToken } from 'antd/es/theme/internal';
 
@@ -17,6 +18,11 @@ const User = lazy(() => import('./pages/users/User'));
 interface CustomToken extends AliasToken {
   cardBg: string;
 }
+
+const RouteTracker = () => {
+  usePageViews();
+  return null;
+};
 
 // A new component to access the context provided by ThemeProvider
 const ThemedApp = () => {
@@ -40,6 +46,7 @@ const ThemedApp = () => {
       }}
     >
       <BrowserRouter>
+        <RouteTracker />
         <Suspense fallback={<div className="flex justify-center items-center h-screen w-full"><Spin size="large" /></div>}>
           <Routes>
             <Route path='/' element={<Dashboard />}>
