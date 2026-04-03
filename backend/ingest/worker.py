@@ -40,6 +40,7 @@ import time
 import datetime
 from datetime import datetime as date
 import logging
+import requests
 from backend.logs.logger_config import init_logger, log_header
 
 MAX_PRIORITY = 10
@@ -200,6 +201,21 @@ class IngestWorker:
                     # Only sync if we successfully got the FULL lists
                     syncSponsors(github_id, sponsors, self.conn)
                     syncSponsorships(github_id, sponsoring, self.conn)
+
+                except requests.exceptions.HTTPError as e:
+                    status = getattr(getattr(e, "response", None), "status_code", None)
+                    if status == 401:
+                        logging.critical(
+                            "GitHub API returned 401 Unauthorized. Your token is missing/invalid/revoked. "
+                            "Fix `PAT` (or `GITHUB_TOKEN`) and restart the worker."
+                        )
+                        raise
+
+                    logging.error(
+                        f"Skipping sync for {user.username} due to fetch error: {e}"
+                    )
+                    # Do NOT update last_scraped so it tries again later
+                    continue
 
                 except Exception as e:
                     logging.error(

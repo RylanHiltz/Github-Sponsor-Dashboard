@@ -6,14 +6,36 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-GITHUB_TOKEN = os.getenv("PAT")
+
+
+def _get_github_token() -> str:
+    """Return GitHub auth token from environment.
+
+    This project historically uses `PAT`. We also accept `GITHUB_TOKEN` as an alias
+    to reduce configuration footguns.
+    """
+    token = (os.getenv("PAT") or os.getenv("GITHUB_TOKEN") or "").strip()
+    if not token:
+        raise RuntimeError(
+            "Missing GitHub token. Set `PAT` (preferred) or `GITHUB_TOKEN` in your .env/environment. "
+            "The token must be a GitHub Personal Access Token with the required scopes."
+        )
+    return token
+
+
+def _build_headers() -> dict:
+    token = _get_github_token()
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        # GitHub API best practice: include a User-Agent.
+        "User-Agent": os.getenv("GITHUB_USER_AGENT", "Github-Sponsor-Dashboard"),
+    }
 
 
 # Function to automatically detect API limits if they occur when running GET requests
 def getRequest(url):
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-    }
+    headers = _build_headers()
     while True:
         res = requests.get(url=url, headers=headers)
 
@@ -55,10 +77,7 @@ def postRequest(url, json=None, initial_delay=2, max_retries=5, timeout=30):
     Returns:
         requests.Response: The response object on success.
     """
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Content-Type": "application/json",
-    }
+    headers = _build_headers()
 
     for attempt in range(max_retries):
         try:
@@ -95,6 +114,11 @@ def postRequest(url, json=None, initial_delay=2, max_retries=5, timeout=30):
                 )
             else:
                 # For client errors (4xx), fail immediately without retrying
+                if e.response.status_code == 401:
+                    logging.error(
+                        "Unauthorized (401) from GitHub API. This usually means your token is missing, invalid, or revoked. "
+                        "Verify `PAT` (or `GITHUB_TOKEN`) is set and valid."
+                    )
                 logging.error(
                     f"Client error ({e.response.status_code}) received. Not retrying. Error: {e}"
                 )
