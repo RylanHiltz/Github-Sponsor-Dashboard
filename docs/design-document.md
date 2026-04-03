@@ -2,7 +2,7 @@
 
 **Component:** `backend/ingest/worker.py`  
 **Date:** February 26, 2026  
-**Project:** GitHub Sponsor Dashboard (ICSE 2026)
+**Project:** GitHub Sponsor Dashboard (FSE' 26)
 
 ---
 
