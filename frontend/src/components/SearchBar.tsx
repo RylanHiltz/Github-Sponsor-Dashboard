@@ -37,7 +37,7 @@ const Search: React.FC<SearchProps> = ({ onSubmit }) => {
             <Input
                 value={searchTerm}
                 allowClear
-                className='min-w-[300px] w-[50%]'
+                className='w-full min-w-0 md:min-w-[300px] md:w-[50%]'
                 placeholder='Search by name or username'
                 onChange={e => setSearchTerm(e.target.value)}
             // The onKeyDown for Enter is no longer needed for search,

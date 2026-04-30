@@ -37,6 +37,7 @@ const ThemedApp = () => {
           // Primary Color
           colorPrimary: theme === 'dark' ? themeColors.primary.dark : themeColors.primary.light,
           colorBgContainer: theme === 'dark' ? '#111' : '#fff',
+          colorBgLayout: theme === 'dark' ? '#111' : '#fff',
           borderColor: theme === 'dark' ? themeColors.border.dark : themeColors.border.light,
           cardBg: theme === 'dark' ? themeColors.cardBg.dark : themeColors.cardBg.light,
           linkHover: theme === 'dark' ? themeColors.text.linkHover.dark : themeColors.text.linkHover.light,

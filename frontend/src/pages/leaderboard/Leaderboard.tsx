@@ -538,14 +538,22 @@ const Leaderboard: React.FC = () => {
 
                         />
                     </div>
-                    <div className='flex-shrink-0 flex justify-end pt-2'>
-                        <div className='flex w-full justify-between items-center'>
+                    <div className='flex-shrink-0 pt-2 overflow-x-auto custom-scrollbar'>
+                        <div className='flex w-max min-w-full justify-between items-center gap-3 flex-nowrap'>
                             {/* Group Filters and Export button */}
-                            <div className='flex gap-2'>
-                                <Button icon={<MdClear />} iconPosition='end' onClick={handleClearFilters}>
+                            <div className='flex gap-2 flex-nowrap'>
+                                <Button
+                                    size='small'
+                                    className='whitespace-nowrap shrink-0'
+                                    icon={<MdClear />}
+                                    iconPosition='end'
+                                    onClick={handleClearFilters}
+                                >
                                     Clear Filters
                                 </Button>
                                 <Button
+                                    size='small'
+                                    className='whitespace-nowrap shrink-0'
                                     icon={<MdFileDownload />}
                                     onClick={() => setIsExportModalOpen(true)}
                                 >
@@ -555,6 +563,8 @@ const Leaderboard: React.FC = () => {
 
                             <Pagination
                                 simple
+                                size='small'
+                                className='shrink-0'
                                 current={pagination.current}
                                 pageSize={pagination.pageSize}
                                 total={pagination.total} // Use total from state
