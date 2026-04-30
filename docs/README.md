@@ -56,7 +56,12 @@ The worker is configured via environment variables. Create a `.env` file in the 
 
 | Variable      | Description |
 | :------------ | :------------------------------------------------------------------------------------------------------ |
-| `PAT`         | A GitHub Personal Access Token with `user` and `read:org` scopes.                                       |
+| `PAT`         | A GitHub Personal Access Token with `user` and `read:org` scopes (fallback auth mode).                   |
+| `GITHUB_TOKEN`| Alternative fallback token variable, equivalent to `PAT`.                                                 |
+| `GITHUB_APP_ID` | GitHub App ID (enables automatic short-lived installation token rotation).                              |
+| `GITHUB_APP_INSTALLATION_ID` | Installation ID for the GitHub App in the target account/org.                           |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key PEM content (supports escaped newlines `\\n`).                         |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | Optional path to private key PEM file (use instead of inline key).                      |
 | `host`        | The hostname of your PostgreSQL database.                                                               |
 | `port`        | The port for your PostgreSQL database.                                                                  |
 | `user`        | The username for your PostgreSQL database.                                                              |

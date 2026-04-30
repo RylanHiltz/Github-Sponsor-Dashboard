@@ -2,10 +2,129 @@ import requests
 import time
 import os
 import logging
+import threading
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+try:
+    import jwt
+except ImportError:  # pragma: no cover - exercised only when dependency missing
+    jwt = None
+
+
+_APP_TOKEN_CACHE = {"token": None, "expires_at": None}
+_APP_TOKEN_LOCK = threading.Lock()
+_APP_TOKEN_REFRESH_BUFFER_SECONDS = 120
+
+
+def _read_github_app_private_key() -> str:
+    key = (os.getenv("GITHUB_APP_PRIVATE_KEY") or "").strip()
+    if key:
+        return key.replace("\\n", "\n")
+
+    key_path = (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
+    if key_path:
+        with open(key_path, "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    raise RuntimeError(
+        "GitHub App auth is enabled but no private key found. "
+        "Set `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH`."
+    )
+
+
+def _github_app_auth_enabled() -> bool:
+    return bool(
+        (os.getenv("GITHUB_APP_ID") or "").strip()
+        and (os.getenv("GITHUB_APP_INSTALLATION_ID") or "").strip()
+        and (
+            (os.getenv("GITHUB_APP_PRIVATE_KEY") or "").strip()
+            or (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
+        )
+    )
+
+
+def _get_cached_app_token(now: datetime) -> str | None:
+    expires_at = _APP_TOKEN_CACHE.get("expires_at")
+    token = _APP_TOKEN_CACHE.get("token")
+    if not token or not expires_at:
+        return None
+
+    if expires_at > now + timedelta(seconds=_APP_TOKEN_REFRESH_BUFFER_SECONDS):
+        return token
+    return None
+
+
+def _build_github_app_jwt(app_id: str, private_key: str) -> str:
+    if jwt is None:
+        raise RuntimeError(
+            "GitHub App auth requires PyJWT. Install dependencies and retry."
+        )
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "iat": int((now - timedelta(seconds=60)).timestamp()),
+        "exp": int((now + timedelta(minutes=9)).timestamp()),
+        "iss": app_id,
+    }
+    return jwt.encode(payload, private_key, algorithm="RS256")
+
+
+def _request_installation_token() -> tuple[str, datetime]:
+    app_id = (os.getenv("GITHUB_APP_ID") or "").strip()
+    installation_id = (os.getenv("GITHUB_APP_INSTALLATION_ID") or "").strip()
+
+    if not app_id or not installation_id:
+        raise RuntimeError(
+            "GitHub App auth requires `GITHUB_APP_ID` and `GITHUB_APP_INSTALLATION_ID`."
+        )
+
+    private_key = _read_github_app_private_key()
+    app_jwt = _build_github_app_jwt(app_id, private_key)
+    url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+
+    response = requests.post(
+        url=url,
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": os.getenv("GITHUB_USER_AGENT", "Github-Sponsor-Dashboard"),
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    token = data.get("token")
+    expires_at_raw = data.get("expires_at")
+    if not token or not expires_at_raw:
+        raise RuntimeError(
+            "GitHub App token exchange succeeded but response was missing token fields."
+        )
+
+    expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
+    return token, expires_at
+
+
+def _get_github_app_installation_token() -> str:
+    now = datetime.now(timezone.utc)
+    cached = _get_cached_app_token(now)
+    if cached:
+        return cached
+
+    with _APP_TOKEN_LOCK:
+        now = datetime.now(timezone.utc)
+        cached = _get_cached_app_token(now)
+        if cached:
+            return cached
+
+        token, expires_at = _request_installation_token()
+        _APP_TOKEN_CACHE["token"] = token
+        _APP_TOKEN_CACHE["expires_at"] = expires_at
+        return token
 
 
 def _get_github_token() -> str:
@@ -14,11 +133,15 @@ def _get_github_token() -> str:
     This project historically uses `PAT`. We also accept `GITHUB_TOKEN` as an alias
     to reduce configuration footguns.
     """
+    if _github_app_auth_enabled():
+        return _get_github_app_installation_token()
+
     token = (os.getenv("PAT") or os.getenv("GITHUB_TOKEN") or "").strip()
     if not token:
         raise RuntimeError(
-            "Missing GitHub token. Set `PAT` (preferred) or `GITHUB_TOKEN` in your .env/environment. "
-            "The token must be a GitHub Personal Access Token with the required scopes."
+            "Missing GitHub auth configuration. Set GitHub App env vars "
+            "(`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`/`..._PATH`) "
+            "or set `PAT` (preferred) / `GITHUB_TOKEN`."
         )
     return token
 

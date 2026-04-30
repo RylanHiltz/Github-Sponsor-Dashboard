@@ -254,8 +254,12 @@ This result drives the branch decision in the worker:
 **Location:** `backend/ingest/use_auth.py`  
 **Called from:** `IngestWorker.run()` — top of each loop iteration  
 **Purpose:**
-- `is_auth_expiring_soon()` checks the expiry of the GitHub Personal Access Token stored in `auth.json` and returns `True` if renewal is needed.
-- `get_auth()` refreshes the token (via a device flow or pre-configured rotation mechanism) and updates `auth.json`.
+- `is_auth_expiring_soon()` checks whether browser auth state (`auth.json`) used by Playwright is close to expiry.
+- `get_auth()` refreshes browser auth state for scraping operations that rely on a logged-in GitHub web session.
+
+> Note: API authentication now supports two modes in `backend/utils/github_api.py`:
+> 1) GitHub App installation tokens (preferred, auto-rotated in-process before expiry), and
+> 2) PAT/GITHUB_TOKEN fallback for legacy deployments.
 
 ---
 
