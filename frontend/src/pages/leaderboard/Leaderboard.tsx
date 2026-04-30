@@ -72,6 +72,16 @@ const Leaderboard: React.FC = () => {
     const ref1 = useRef<HTMLDivElement | null>(null)
     const [loading, setLoading] = useState(false);
 
+    // Prevent overlapping requests (e.g., pagination spam). If a fetch is requested while one
+    // is in flight, we queue the latest params and run it immediately after the current request finishes.
+    const usersFetchInFlightRef = useRef(false);
+    const queuedUsersFetchRef = useRef<{
+        pagination: TablePaginationConfig;
+        filters: Record<string, FilterValue | null>;
+        sorters: Record<string, SortOrder | null>;
+    } | null>(null);
+    const activeUsersFetchAbortRef = useRef<AbortController | null>(null);
+
     const [users, setUsers] = useState<LeaderboardUser[]>([]);
     const [locationFilters, setLocationFilters] = useState<Location[]>([])
     const [leaderboardData, setLeaderboardData] = useState<LeaderboardStatsData | null>(null);
@@ -198,7 +208,23 @@ const Leaderboard: React.FC = () => {
         currentFilters: Record<string, FilterValue | null>,
         currentSorters: Record<string, SortOrder | null>
     ) => {
+        // If a request is already in-flight, queue the latest desired fetch and return.
+        if (usersFetchInFlightRef.current) {
+            queuedUsersFetchRef.current = {
+                pagination: currentPagination,
+                filters: currentFilters,
+                sorters: currentSorters,
+            };
+            return;
+        }
+
+        usersFetchInFlightRef.current = true;
         setLoading(true);
+
+        // Abort only on component unmount or if something else explicitly aborts.
+        // (We intentionally do NOT abort on pagination spam; instead we queue.)
+        const controller = new AbortController();
+        activeUsersFetchAbortRef.current = controller;
 
         const queryParams = new URLSearchParams({
             page: (currentPagination.current || 1).toString(),
@@ -225,7 +251,9 @@ const Leaderboard: React.FC = () => {
         });
 
         try {
-            const response = await fetch(`${apiUrl}/users?${queryParams.toString()}`);
+            const response = await fetch(`${apiUrl}/users?${queryParams.toString()}`, {
+                signal: controller.signal,
+            });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
             const data = await response.json(); // Expects { users: [], total: number }
@@ -245,9 +273,23 @@ const Leaderboard: React.FC = () => {
                 total: data.total, // Set total from the API response
             }));
 
-        } catch (error) {
-            console.error("Error fetching users:", error);
+        } catch (error: any) {
+            if (error?.name !== 'AbortError') {
+                console.error("Error fetching users:", error);
+            }
         } finally {
+            usersFetchInFlightRef.current = false;
+            activeUsersFetchAbortRef.current = null;
+
+            const queued = queuedUsersFetchRef.current;
+            queuedUsersFetchRef.current = null;
+
+            if (queued) {
+                // Keep loading spinner visible while immediately processing the queued request.
+                void fetchUsers(queued.pagination, queued.filters, queued.sorters);
+                return;
+            }
+
             setLoading(false);
         }
     };
@@ -508,6 +550,13 @@ const Leaderboard: React.FC = () => {
 
     }, [pagination.current, pagination.pageSize, filters, sorters]);
 
+    useEffect(() => {
+        return () => {
+            // Avoid setting state after unmount; cancel any in-flight request.
+            activeUsersFetchAbortRef.current?.abort();
+        };
+    }, []);
+
 
     return (
         <>
@@ -538,16 +587,17 @@ const Leaderboard: React.FC = () => {
 
                         />
                     </div>
-                    <div className='flex-shrink-0 pt-2 overflow-x-auto custom-scrollbar'>
-                        <div className='flex w-max min-w-full justify-between items-center gap-3 flex-nowrap'>
+                    <div className='flex-shrink-0 pt-2'>
+                        <div className='flex w-full justify-between items-center gap-3 flex-wrap'>
                             {/* Group Filters and Export button */}
-                            <div className='flex gap-2 flex-nowrap'>
+                            <div className='flex gap-2 flex-wrap'>
                                 <Button
                                     size='small'
                                     className='whitespace-nowrap shrink-0'
                                     icon={<MdClear />}
                                     iconPosition='end'
                                     onClick={handleClearFilters}
+                                    disabled={loading}
                                 >
                                     Clear Filters
                                 </Button>
@@ -556,6 +606,7 @@ const Leaderboard: React.FC = () => {
                                     className='whitespace-nowrap shrink-0'
                                     icon={<MdFileDownload />}
                                     onClick={() => setIsExportModalOpen(true)}
+                                    disabled={loading}
                                 >
                                     Export CSV
                                 </Button>
@@ -569,8 +620,10 @@ const Leaderboard: React.FC = () => {
                                 pageSize={pagination.pageSize}
                                 total={pagination.total} // Use total from state
                                 showSizeChanger
+                                disabled={loading}
                                 pageSizeOptions={['10', '20', '50', '100']}
                                 onChange={(page, size) => {
+                                    if (loading) return;
                                     setPagination(prev => ({
                                         ...prev,
                                         current: page,

@@ -258,13 +258,13 @@ const User: React.FC = () => {
     return (
         <>
             <div className='h-full'>
-                <div className="flex flex-col h-full px-5 gap-5 pb-5 overflow-hidden">
+                <div className="flex flex-col h-full min-h-0 px-3 sm:px-5 gap-5 pb-5 overflow-x-auto overflow-y-auto custom-scrollbar xl:overflow-hidden xl:overflow-x-hidden">
                     <Button className='w-min' type='text' onClick={navigateLeaderboard}><IoChevronBackOutline /> Back To Dashboard</Button>
 
-                    <section className='flex-grow grid grid-cols-[2fr_minmax(20em,28em)] 2xl:grid-cols-[2fr_minmax(24em,36em)] grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-5 min-h-0'>
+                    <section className='flex flex-col gap-5 xl:flex-grow xl:min-h-0 xl:grid xl:grid-cols-[2fr_minmax(20em,28em)] 2xl:grid-cols-[2fr_minmax(24em,36em)] xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]'>
 
                         {/* TOP LEFT: USER PROFILE (Unchanged) */}
-                        <div className={`${styles.profileCard} row-span-1 flex flex-col justify-between border-solid overflow-hidden p-6`} style={{ borderColor: token.colorBorder }}>
+                        <div className={`${styles.profileCard} flex flex-col justify-between border-solid overflow-hidden p-4 sm:p-6`} style={{ borderColor: token.colorBorder }}>
                             <div className='flex flex-col gap-3 pr-1'>
                                 <div className='flex items-center gap-4'>
                                     {isLoading == false ? (
@@ -338,8 +338,8 @@ const User: React.FC = () => {
                         </div>
 
                         {/* RIGHT COLUMN: STATS CARD (Unchanged) */}
-                        <div className={`${styles.profileCard} row-span-2 flex flex-col min-h-0 p-6`} style={{ borderColor: token.colorBorder }}>
-                            <div className="flex flex-col flex-1 gap-4 xl:gap-5 pr-2 overflow-y-hidden">
+                        <div className={`${styles.profileCard} xl:row-span-2 flex flex-col min-h-0 p-4 sm:p-6`} style={{ borderColor: token.colorBorder }}>
+                            <div className="flex flex-col flex-1 gap-4 xl:gap-5 pr-2 overflow-y-visible xl:overflow-y-auto custom-scrollbar">
                                 {(() => {
                                     const StatRow = ({ label, value, format }: { label: string, value: any, format?: 'currency' | 'date' | 'number' }) => {
                                         let displayValue = 'N/A';
@@ -404,10 +404,10 @@ const User: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className={`${styles.profileCard} row-span-1 flex flex-col min-h-0 gap-5 p-5`} style={{ borderColor: token.colorBorder }}>
-                            <div className='flex justify-between items-center'>
-                                <div className="flex gap-4 items-center">
-                                    <div className="flex items-center gap-2">
+                        <div className={`${styles.profileCard} flex flex-col min-h-0 gap-5 p-4 sm:p-6`} style={{ borderColor: token.colorBorder }}>
+                            <div className='flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center'>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 sm:items-center min-w-0">
+                                    <div className="flex items-center gap-2 min-w-0">
                                         <h2 className="text-xl font-semibold">
                                             {viewMode === 'Activity' ? 'Visualized User Activity' : 'Sponsorship Growth'}
                                         </h2>
@@ -448,7 +448,7 @@ const User: React.FC = () => {
                                     disabled={isLoading}
                                 />
                             </div>
-                            <div className='relative flex-grow min-h-0 w-full'>
+                            <div className='relative w-full min-h-[260px] sm:min-h-[320px] xl:flex-grow xl:min-h-0'>
                                 {isLoading ? (
                                     <Skeleton active />
                                 ) : (

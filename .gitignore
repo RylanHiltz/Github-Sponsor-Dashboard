@@ -23,5 +23,8 @@ worker_state.json
 
 /local_files
 
+# Local docs (do not commit)
+/docs/_local/
+
 # Frontend build output
 /frontend/dist
