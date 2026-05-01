@@ -28,3 +28,6 @@ worker_state.json
 
 # Frontend build output
 /frontend/dist
+
+# 
+*.dump
