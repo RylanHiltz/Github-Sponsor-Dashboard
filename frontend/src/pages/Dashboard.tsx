@@ -10,6 +10,7 @@ import DarkmodeButton from '../components/DarkmodeButton';
 import { AiFillGithub } from "react-icons/ai";
 import { MdSpaceDashboard } from "react-icons/md";
 import { MdDarkMode, MdLightMode } from 'react-icons/md';
+import { MdAccountTree } from 'react-icons/md';
 import { IoMdStats } from "react-icons/io";
 
 
@@ -31,6 +32,7 @@ const DashboardContent: React.FC = () => {
     const routes: { [key: string]: string } = {
         '1': '/',
         '2': '/statistics',
+        '3': '/graph',
         // '3': '/request-user',
         // '4': '/docs'
     };
@@ -161,6 +163,11 @@ const DashboardContent: React.FC = () => {
                                 label: 'Analytics',
                                 icon: <IoMdStats />
                             },
+                            {
+                                key: '3',
+                                label: 'Graph',
+                                icon: <MdAccountTree />
+                            },
                         ]}
                     />
                 </Sider>
@@ -197,6 +204,11 @@ const DashboardContent: React.FC = () => {
                                 key: '2',
                                 label: 'Analytics',
                                 icon: <IoMdStats />
+                            },
+                            {
+                                key: '3',
+                                label: 'Graph',
+                                icon: <MdAccountTree />
                             },
                         ]}
                     />

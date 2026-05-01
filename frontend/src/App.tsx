@@ -12,6 +12,7 @@ import type { AliasToken } from 'antd/es/theme/internal';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Leaderboard = lazy(() => import('./pages/leaderboard/Leaderboard'));
 const Statistics = lazy(() => import('./pages/statistics/Statistics'));
+const GraphPage = lazy(() => import('./pages/graph/GraphPage'));
 const RequestUser = lazy(() => import('./pages/users/RequestUser.tsx'));
 const User = lazy(() => import('./pages/users/User'));
 
@@ -54,6 +55,7 @@ const ThemedApp = () => {
               <Route path='' element={<Leaderboard />} />
               <Route path="/user/:id" element={<User />} />
               <Route path='statistics' element={<Statistics />} />
+              <Route path='graph' element={<GraphPage />} />
               <Route path='request-user' element={<RequestUser />} />
             </Route>
           </Routes>
