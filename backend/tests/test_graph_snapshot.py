@@ -23,7 +23,14 @@ class SponsorshipGraphSnapshotTests(unittest.TestCase):
         self.engine.dispose()
 
     def _add_user(self, user_id, username):
-        self.session.add(User(id=user_id, username=username))
+        self.session.add(
+            User(
+                id=user_id,
+                username=username,
+                profile_url=f"https://github.com/{username}",
+                is_enriched=True,
+            )
+        )
 
     def test_snapshot_maps_edges_to_dense_indexes_and_degrees(self):
         self._add_user(10, "sponsor-a")
@@ -49,6 +56,14 @@ class SponsorshipGraphSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["edgeCount"], 3)
         self.assertEqual(snapshot["ids"], [10, 20, 30])
         self.assertEqual(snapshot["usernames"], ["sponsor-a", "sponsored-b", "sponsor-c"])
+        self.assertEqual(
+            snapshot["profileUrls"],
+            [
+                "https://github.com/sponsor-a",
+                "https://github.com/sponsored-b",
+                "https://github.com/sponsor-c",
+            ],
+        )
         self.assertEqual(snapshot["src"], [0, 2, 0])
         self.assertEqual(snapshot["dst"], [1, 1, 2])
         self.assertEqual(snapshot["inDegree"], [0, 2, 1])
@@ -65,9 +80,10 @@ class SponsorshipGraphSnapshotTests(unittest.TestCase):
 
         snapshot = build_sponsorship_graph_snapshot(self.session)
 
-        self.assertEqual(snapshot["nodeCount"], 0)
+        self.assertEqual(snapshot["nodeCount"], 1)
         self.assertEqual(snapshot["edgeCount"], 0)
         self.assertEqual(snapshot["omittedNodeCount"], 1)
+        self.assertEqual(snapshot["ids"], [1])
 
     def test_empty_graph_returns_empty_arrays(self):
         snapshot = build_sponsorship_graph_snapshot(self.session)
@@ -76,6 +92,26 @@ class SponsorshipGraphSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["edgeCount"], 0)
         for key in ("ids", "usernames", "x", "y", "z", "size", "inDegree", "outDegree", "src", "dst"):
             self.assertEqual(snapshot[key], [])
+
+    def test_snapshot_omits_unenriched_users_from_graph_nodes(self):
+        self._add_user(1, "enriched-sponsor")
+        self.session.add(
+            User(
+                id=2,
+                username="unenriched-sponsored",
+                profile_url="https://github.com/unenriched-sponsored",
+                is_enriched=False,
+            )
+        )
+        self.session.add(Sponsorship(id=1, sponsor_id=1, sponsored_id=2))
+        self.session.add(SponsorshipLayout(user_id=1, x=0.0, y=0.0, z=0.0))
+        self.session.commit()
+
+        snapshot = build_sponsorship_graph_snapshot(self.session)
+
+        self.assertEqual(snapshot["nodeCount"], 1)
+        self.assertEqual(snapshot["edgeCount"], 0)
+        self.assertEqual(snapshot["ids"], [1])
 
 
 class SponsorshipGraphRouteTests(unittest.TestCase):

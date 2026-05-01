@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Numeric, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.sqlalchemy import Base
@@ -19,6 +19,7 @@ class User(Base):
     private_sponsor_count: Mapped[Optional[int]] = mapped_column(BigInteger)
     github_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     min_sponsor_cost: Mapped[Optional[float]] = mapped_column(Numeric)
+    is_enriched: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 class Sponsorship(Base):

@@ -23,6 +23,7 @@ const parseGraphSnapshot = (snapshot: GraphSnapshot): ParsedGraphSnapshot => {
         edgeCount: snapshot.edgeCount,
         ids: Uint32Array.from(snapshot.ids),
         usernames: snapshot.usernames,
+        profileUrls: snapshot.profileUrls,
         positions,
         sizes: Float32Array.from(snapshot.size),
         inDegree: Uint32Array.from(snapshot.inDegree),
@@ -33,7 +34,7 @@ const parseGraphSnapshot = (snapshot: GraphSnapshot): ParsedGraphSnapshot => {
 };
 
 const validateSnapshot = (snapshot: GraphSnapshot) => {
-    const nodeKeys: Array<keyof GraphSnapshot> = ['ids', 'usernames', 'x', 'y', 'z', 'size', 'inDegree', 'outDegree'];
+    const nodeKeys: Array<keyof GraphSnapshot> = ['ids', 'usernames', 'profileUrls', 'x', 'y', 'z', 'size', 'inDegree', 'outDegree'];
     const edgeKeys: Array<keyof GraphSnapshot> = ['src', 'dst'];
 
     for (const key of nodeKeys) {

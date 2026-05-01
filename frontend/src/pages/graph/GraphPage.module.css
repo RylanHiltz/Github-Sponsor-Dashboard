@@ -38,6 +38,18 @@
   @apply rounded-md border px-3 py-1 text-[13px] leading-5;
 }
 
+.graphControls {
+  @apply absolute left-3 top-3 z-10 rounded-md border p-1 shadow-lg;
+}
+
 .tooltip {
-  @apply pointer-events-none absolute z-10 rounded-md border px-3 py-2 text-[12px] leading-5 shadow-lg;
+  @apply pointer-events-auto absolute z-10 min-w-[180px] rounded-md border px-3 py-2 pr-9 text-[12px] leading-5 shadow-lg;
+}
+
+.tooltipLink {
+  @apply block truncate text-[13px] font-semibold;
+}
+
+.tooltipClose {
+  @apply absolute right-1 top-1;
 }

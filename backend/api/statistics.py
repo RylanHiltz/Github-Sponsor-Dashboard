@@ -35,6 +35,31 @@ sponsorship_counts AS (
     LEFT JOIN sponsored_counts sc ON u.id = sc.user_id
     LEFT JOIN sponsoring_counts gc ON u.id = gc.user_id
 ),
+graph_edges_cte AS (
+    SELECT s.sponsor_id, s.sponsored_id
+    FROM sponsorship s
+    JOIN users sponsor ON sponsor.id = s.sponsor_id
+    JOIN users sponsored ON sponsored.id = s.sponsored_id
+    WHERE sponsor.is_enriched IS TRUE
+      AND sponsored.is_enriched IS TRUE
+      AND s.sponsor_id IS NOT NULL
+      AND s.sponsored_id IS NOT NULL
+),
+graph_users_cte AS (
+    SELECT s.sponsor_id AS user_id
+    FROM sponsorship s
+    JOIN users u ON u.id = s.sponsor_id
+    WHERE u.is_enriched IS TRUE
+      AND s.sponsor_id IS NOT NULL
+
+    UNION
+
+    SELECT s.sponsored_id AS user_id
+    FROM sponsorship s
+    JOIN users u ON u.id = s.sponsored_id
+    WHERE u.is_enriched IS TRUE
+      AND s.sponsored_id IS NOT NULL
+),
 total_users_cte AS (
     SELECT COUNT(DISTINCT u.id) AS total_users
     FROM users u
@@ -63,6 +88,8 @@ top_sponsored_cte AS (
 SELECT
     (SELECT total_users FROM total_users_cte) AS total_users,
     (SELECT total_sponsorships FROM total_sponsorships_cte) AS total_sponsorships,
+    (SELECT COUNT(*) FROM graph_users_cte) AS graph_nodes,
+    (SELECT COUNT(*) FROM graph_edges_cte) AS graph_sponsorships,
     (SELECT row_to_json(top_sponsoring_cte) FROM top_sponsoring_cte) AS top_sponsoring,
     (SELECT row_to_json(top_sponsored_cte) FROM top_sponsored_cte) AS top_sponsored;
             """

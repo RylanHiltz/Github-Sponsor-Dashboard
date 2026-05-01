@@ -30,7 +30,16 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
     ).all()
 
     edges = [(int(sponsor_id), int(sponsored_id)) for sponsor_id, sponsored_id in edge_rows]
-    node_ids = sorted({node_id for edge in edges for node_id in edge})
+    edge_node_ids = sorted({node_id for edge in edges for node_id in edge})
+    node_ids = [
+        int(user_id)
+        for (user_id,) in session.execute(
+            select(User.id).where(
+                User.id.in_(edge_node_ids),
+                User.is_enriched.is_(True),
+            )
+        ).all()
+    ]
 
     if not node_ids:
         return {
@@ -38,6 +47,7 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
             "edgeCount": 0,
             "ids": [],
             "usernames": [],
+            "profileUrls": [],
             "x": [],
             "y": [],
             "z": [],
@@ -47,6 +57,13 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
             "src": [],
             "dst": [],
         }
+
+    node_id_set = set(node_ids)
+    edges = [
+        (sponsor_id, sponsored_id)
+        for sponsor_id, sponsored_id in edges
+        if sponsor_id in node_id_set and sponsored_id in node_id_set
+    ]
 
     layout_rows = session.execute(
         select(
@@ -70,12 +87,15 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
             for sponsor_id, sponsored_id in edges
             if sponsor_id in layout_node_id_set and sponsored_id in layout_node_id_set
         ]
-        node_ids = sorted({node_id for edge in edges for node_id in edge})
+        node_ids = [node_id for node_id in node_ids if node_id in layout_node_id_set]
 
     user_rows = session.execute(
-        select(User.id, User.username).where(User.id.in_(node_ids))
+        select(User.id, User.username, User.profile_url).where(User.id.in_(node_ids))
     ).all()
-    usernames_by_id = {int(user_id): username for user_id, username in user_rows}
+    users_by_id = {
+        int(user_id): (username, profile_url)
+        for user_id, username, profile_url in user_rows
+    }
 
     dense_index_by_id = {user_id: index for index, user_id in enumerate(node_ids)}
     in_degrees = Counter(sponsored_id for _, sponsored_id in edges)
@@ -88,18 +108,22 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
     in_degree_values: list[int] = []
     out_degree_values: list[int] = []
     usernames: list[str] = []
+    profile_urls: list[str] = []
 
     for user_id in node_ids:
         x, y, z = layout_by_user_id[user_id]
         in_degree = in_degrees[user_id]
         out_degree = out_degrees[user_id]
+        username, profile_url = users_by_id.get(user_id, (None, None))
+        display_name = username or f"user-{user_id}"
         x_values.append(x)
         y_values.append(y)
         z_values.append(z)
         sizes.append(graph_node_size(in_degree))
         in_degree_values.append(in_degree)
         out_degree_values.append(out_degree)
-        usernames.append(usernames_by_id.get(user_id) or f"user-{user_id}")
+        usernames.append(display_name)
+        profile_urls.append(profile_url or f"https://github.com/{display_name}")
 
     return {
         "nodeCount": len(node_ids),
@@ -107,6 +131,7 @@ def build_sponsorship_graph_snapshot(session: Session) -> dict[str, Any]:
         "omittedNodeCount": missing_layout_count,
         "ids": node_ids,
         "usernames": usernames,
+        "profileUrls": profile_urls,
         "x": x_values,
         "y": y_values,
         "z": z_values,

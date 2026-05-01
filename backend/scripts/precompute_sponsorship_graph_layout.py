@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from backend.db.sqlalchemy import Base, SessionLocal, get_engine
-from backend.models.orm import Sponsorship, SponsorshipLayout
+from backend.models.orm import Sponsorship, SponsorshipLayout, User
 
 
 GOLDEN_ANGLE = pi * (3.0 - sqrt(5.0))
@@ -37,7 +37,10 @@ def _connected_components(edges: list[tuple[int, int]]) -> list[list[int]]:
     return sorted(components, key=len, reverse=True)
 
 
-def _layout_rows(edges: list[tuple[int, int]]) -> list[dict[str, float | int]]:
+def _layout_rows(
+    edges: list[tuple[int, int]],
+    included_node_ids: set[int] | None = None,
+) -> list[dict[str, float | int]]:
     in_degrees = Counter(sponsored_id for _, sponsored_id in edges)
     out_degrees = Counter(sponsor_id for sponsor_id, _ in edges)
     components = _connected_components(edges)
@@ -62,6 +65,9 @@ def _layout_rows(edges: list[tuple[int, int]]) -> list[dict[str, float | int]]:
         )
 
         for node_index, user_id in enumerate(ordered_nodes):
+            if included_node_ids is not None and user_id not in included_node_ids:
+                continue
+
             angle = node_index * GOLDEN_ANGLE
             radius = component_radius * sqrt((node_index + 0.5) / component_size)
             degree_balance = out_degrees[user_id] - in_degrees[user_id]
@@ -91,7 +97,17 @@ def precompute_layout() -> int:
             (int(sponsor_id), int(sponsored_id))
             for sponsor_id, sponsored_id in edge_rows
         ]
-        rows = _layout_rows(edges)
+        edge_node_ids = sorted({node_id for edge in edges for node_id in edge})
+        enriched_node_ids = {
+            int(user_id)
+            for (user_id,) in session.execute(
+                select(User.id).where(
+                    User.id.in_(edge_node_ids),
+                    User.is_enriched.is_(True),
+                )
+            ).all()
+        }
+        rows = _layout_rows(edges, included_node_ids=enriched_node_ids)
 
         session.execute(delete(SponsorshipLayout))
         if rows:
