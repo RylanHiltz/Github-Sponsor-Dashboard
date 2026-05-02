@@ -6,6 +6,72 @@
   @apply p-4 rounded-xl border-[1px] shadow-lg;
 }
 
+.statsGrid {
+  @apply flex-1 min-h-0 h-full flex flex-col gap-4 overflow-y-auto pt-2.5 pb-3;
+}
+
+.summaryCard {
+  @apply min-h-[120px];
+}
+
+.barGraphCard {
+  @apply min-h-[473px];
+}
+
+.pieGraphCard {
+  @apply min-h-[330px];
+}
+
+.chartShell {
+  @apply relative flex h-full min-h-0 flex-col;
+}
+
+.scrollChartShell {
+  @apply flex h-full min-h-0 flex-col overflow-x-auto overflow-y-hidden;
+}
+
+.locationBarCanvas {
+  @apply min-w-[1500px] min-h-[405px] flex-1 pb-10;
+}
+
+.pieGraphShell {
+  @apply relative flex h-full min-h-0 w-full flex-col;
+}
+
+.chartHeader {
+  @apply flex shrink-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between;
+}
+
+.pieChartBody {
+  @apply min-h-[248px] flex-1 p-3;
+}
+
+@media (min-width: 768px) {
+  .statsGrid {
+    @apply grid grid-cols-6 auto-rows-fr overflow-hidden pb-2;
+  }
+
+  .summaryCard,
+  .barGraphCard,
+  .pieGraphCard {
+    @apply min-h-0;
+  }
+
+  .locationBarCanvas {
+    @apply min-h-0;
+  }
+
+  .pieChartBody {
+    @apply min-h-0 p-5;
+  }
+}
+
+@media (min-width: 1280px) {
+  .statsGrid {
+    @apply grid-cols-12;
+  }
+}
+
 /* Title for grid Cards */
 .Card h1 {
   @apply text-[16px];

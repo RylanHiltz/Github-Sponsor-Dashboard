@@ -91,17 +91,11 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                 </div> */}
                 <div
                     ref={containerRef}
-                    className="
-                    flex-1 min-h-0 h-full
-                    grid gap-4 pt-2.5 pb-2
-                    grid-cols-1 sm:grid-cols-2 md:grid-cols-6 xl:grid-cols-12
-                    auto-rows-[minmax(120px,auto)] sm:auto-rows-[minmax(140px,auto)] md:auto-rows-fr xl:auto-rows-fr
-                    overflow-y-auto md:overflow-hidden
-                    "
+                    className={styles.statsGrid}
                 >
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-1 md:col-span-3 xl:col-span-3 min-h-[120px] md:min-h-0`}
+                        className={`${styles.Card} ${styles.summaryCard} md:col-span-3 xl:col-span-3`}
                     >
                         {isLoading ? <Skeleton active paragraph={{ rows: 1 }} /> : (
                             <>
@@ -112,7 +106,7 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                     </div>
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-1 md:col-span-3 xl:col-span-3 min-h-[120px] md:min-h-0`}
+                        className={`${styles.Card} ${styles.summaryCard} md:col-span-3 xl:col-span-3`}
                     >
                         {isLoading ? <Skeleton active paragraph={{ rows: 1 }} /> : (
                             <>
@@ -123,7 +117,7 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                     </div>
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-1 md:col-span-3 xl:col-span-3 min-h-[120px] md:min-h-0`}
+                        className={`${styles.Card} ${styles.summaryCard} md:col-span-3 xl:col-span-3`}
                     >
                         {isLoading ? <Skeleton active paragraph={{ rows: 1 }} /> : (
                             <>
@@ -137,7 +131,7 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                     </div>
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-1 md:col-span-3 xl:col-span-3 min-h-[120px] md:min-h-0`}
+                        className={`${styles.Card} ${styles.summaryCard} md:col-span-3 xl:col-span-3`}
                     >
                         {isLoading ? <Skeleton active paragraph={{ rows: 1 }} /> : (
                             <>
@@ -153,7 +147,7 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                     {/* Largest graph */}
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-2 md:col-span-4 xl:col-span-8 row-span-2 md:row-span-4 xl:row-span-6`}
+                        className={`${styles.Card} ${styles.barGraphCard} md:col-span-4 xl:col-span-8 md:row-span-4 xl:row-span-6`}
                     >
                         <LocationRolesGraph />
                     </div>
@@ -161,13 +155,13 @@ const GeneralStatistics = ({ playSignal }: { playSignal: number }) => {
                     {/* Right-side graphs */}
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-2 md:col-span-2 xl:col-span-4 row-span-2 md:row-span-2 xl:row-span-3`}
+                        className={`${styles.Card} ${styles.pieGraphCard} md:col-span-2 xl:col-span-4 md:row-span-2 xl:row-span-3`}
                     >
                         <SponsorshipRolesByTypeGraph />
                     </div>
                     <div
                         style={{ borderColor: token.colorBorder, backgroundColor: token.cardBg }}
-                        className={`${styles.Card} col-span-1 sm:col-span-2 md:col-span-2 xl:col-span-4 row-span-2 md:row-span-2 xl:row-span-3`}
+                        className={`${styles.Card} ${styles.pieGraphCard} md:col-span-2 xl:col-span-4 md:row-span-2 xl:row-span-3`}
                     >
                         <GenderDistributionGraph />
                     </div>
@@ -244,11 +238,11 @@ const LocationRolesGraph = () => {
     }, []);
 
     return (
-        <div className={`relative flex-grow h-full`}>
+        <div className={styles.chartShell}>
             {isLoading ? <Skeleton active /> : (
-                <div className={`overflow-x-auto h-full custom-scrollbar overflow-y-hidden`}>
+                <div className={`${styles.scrollChartShell} custom-scrollbar`}>
                     <h1 className="font-medium pl-0.5 text-nowrap pb-3">Sponsorship Roles by Location (Top 20)</h1>
-                    <div className="min-w-[1500px] h-full pb-10">
+                    <div className={styles.locationBarCanvas}>
                         <Bar options={chartOptions} data={chartData} />
                     </div>
                 </div>
@@ -345,10 +339,10 @@ const SponsorshipRolesByTypeGraph = () => {
     }, [dataType, allData]);
 
     return (
-        <div className='relative flex-grow h-full w-full pb-5'>
+        <div className={styles.pieGraphShell}>
             {isLoading ? <Skeleton active /> : (
                 <>
-                    <div className="flex justify-between items-center">
+                    <div className={styles.chartHeader}>
                         <h1 className="font-medium">Sponsorship Roles By Type</h1>
                         <Space.Compact>
                             <Button type={dataType === 'user' ? 'primary' : 'default'} onClick={() => setDataType('user')}>User</Button>
@@ -356,7 +350,7 @@ const SponsorshipRolesByTypeGraph = () => {
                             <Button type={dataType === 'total' ? 'primary' : 'default'} onClick={() => setDataType('total')}>Total</Button>
                         </Space.Compact>
                     </div>
-                    <div className="h-full p-5">
+                    <div className={styles.pieChartBody}>
                         <Doughnut options={chartOptions} data={chartData} />
                     </div>
                 </>
@@ -466,10 +460,10 @@ const GenderDistributionGraph = () => {
     }, [dataType, allData]);
 
     return (
-        <div className='relative flex-grow h-full w-full'>
+        <div className={styles.pieGraphShell}>
             {isLoading ? <Skeleton active /> : (
                 <>
-                    <div className="flex justify-between items-center">
+                    <div className={styles.chartHeader}>
                         <h1 className="font-medium">User Gender Distribution</h1>
                         <Space.Compact>
                             <Button
@@ -486,7 +480,7 @@ const GenderDistributionGraph = () => {
                             </Button>
                         </Space.Compact>
                     </div>
-                    <div className="h-full p-5">
+                    <div className={styles.pieChartBody}>
                         <Doughnut options={chartOptions} data={chartData} />
                     </div>
                 </>
