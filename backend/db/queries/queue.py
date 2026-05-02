@@ -5,9 +5,9 @@ import os
 # Functional Imports
 import requests
 
+from backend.utils.github_api import postRequest
 
 load_dotenv()
-GITHUB_TOKEN = os.getenv("PAT")
 
 
 # def batchGetQueue(db):
@@ -69,13 +69,11 @@ def batchAddQueue(github_ids, priority, db):
 
 def batchRequeue(db):
     with db.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             UPDATE queue SET
             status = 'pending'
             WHERE status = 'completed';
-            """
-        )
+            """)
     db.commit()
     print("Batch requeued all users")
     return
@@ -102,14 +100,12 @@ def enqueueStaleUsers(db, days_old):
 # Gets the first user inside the queue who has status="pending"
 def getFirstInQueue(db):
     cur = db.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT github_id, priority FROM queue
         WHERE status = 'pending'
         ORDER BY priority DESC
         LIMIT 1;
-        """
-    )
+        """)
     result = cur.fetchone()
     cur.close()
     if result:
@@ -165,13 +161,7 @@ def addToQueue(username, db):
         "variables": {"username": username},
     }
 
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    response = requests.post(
-        "https://api.github.com/graphql", json=graphql_query, headers=headers
-    )
+    response = postRequest("https://api.github.com/graphql", json=graphql_query)
 
     if response.status_code != 200:
         return {"success": False, "error": "GitHub API error"}, response.status_code

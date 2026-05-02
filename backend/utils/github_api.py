@@ -3,9 +3,9 @@ import time
 import os
 import logging
 import threading
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -20,6 +20,26 @@ _APP_TOKEN_LOCK = threading.Lock()
 _APP_TOKEN_REFRESH_BUFFER_SECONDS = 120
 
 
+def _resolve_private_key_path(key_path: str) -> Path:
+    """Resolve a private key path.
+
+    Supports absolute paths and relative paths.
+    - First tries relative-to-CWD (matches prior behavior).
+    - If not found, tries relative-to-repo-root (more ergonomic for .env in repo root).
+    """
+    candidate = Path(key_path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+
+    cwd_candidate = (Path.cwd() / candidate).resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    # backend/utils/github_api.py -> repo root is two parents up from backend/
+    repo_root = Path(__file__).resolve().parents[2]
+    return (repo_root / candidate).resolve()
+
+
 def _read_github_app_private_key() -> str:
     key = (os.getenv("GITHUB_APP_PRIVATE_KEY") or "").strip()
     if key:
@@ -27,7 +47,13 @@ def _read_github_app_private_key() -> str:
 
     key_path = (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
     if key_path:
-        with open(key_path, "r", encoding="utf-8") as fh:
+        resolved = _resolve_private_key_path(key_path)
+        if not resolved.exists():
+            raise RuntimeError(
+                "GitHub App auth is enabled but private key file was not found. "
+                f"GITHUB_APP_PRIVATE_KEY_PATH='{key_path}' resolved to '{resolved}'."
+            )
+        with open(resolved, "r", encoding="utf-8") as fh:
             return fh.read()
 
     raise RuntimeError(
