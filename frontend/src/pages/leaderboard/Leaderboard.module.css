@@ -13,3 +13,41 @@
 .stats h3 {
   @apply text-[16px] leading-7 text-[#848484];
 }
+
+.usernameCell {
+  @apply flex min-w-0 max-w-full items-center gap-2 overflow-hidden whitespace-nowrap;
+}
+
+.usernameAvatar {
+  @apply h-6 w-6 shrink-0 rounded-md object-cover;
+}
+
+.usernameText {
+  @apply block min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap;
+}
+
+.exportButton {
+  @apply shrink-0 whitespace-nowrap;
+}
+
+.exportButtonText {
+  @apply inline;
+}
+
+@media (max-width: 639px) {
+  .usernameCell {
+    @apply gap-1.5;
+  }
+
+  .usernameText {
+    max-width: 78px;
+  }
+
+  .exportButton {
+    @apply w-8 px-0;
+  }
+
+  .exportButtonText {
+    @apply hidden;
+  }
+}

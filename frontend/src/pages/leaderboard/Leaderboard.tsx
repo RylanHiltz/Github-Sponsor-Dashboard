@@ -35,6 +35,16 @@ const EXPORT_OPTIONS = [
     { label: 'Website', value: 'profile_url' },
 ];
 
+const formatUsernameForViewport = (username?: string) => {
+    if (!username) return username;
+
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    const maxLength = isMobile ? 11 : 15;
+    const sliceLength = isMobile ? 10 : 13;
+
+    return username.length > maxLength ? `${username.slice(0, sliceLength)}...` : username;
+};
+
 const useStyle = createStyles(({ css, prefixCls }) => {
     return {
         customTable: css`
@@ -327,22 +337,21 @@ const Leaderboard: React.FC = () => {
             title: "Username",
             dataIndex: "username",
             key: "username",
-            width: 115,
+            width: 135,
             sortDirections: ["descend", "ascend"],
             sorter: true,
             sortOrder: sorters.username || null,
             render: (_: any, record: LeaderboardUser) => (
-                <>
-                    <span className='flex items-center gap-1'>
-                        <img src={record.avatar_url} alt={record.username} style={{ width: 24, borderRadius: '25%', marginRight: 8 }} />
-                        {record.username && record.username.length > 15 ? `${record.username.slice(0, 13)}...` : record.username}
-                    </span>
-                </>
+                <span className={styles.usernameCell} title={record.username}>
+                    <img src={record.avatar_url} alt={record.username} className={styles.usernameAvatar} />
+                    <span className={styles.usernameText}>{formatUsernameForViewport(record.username)}</span>
+                </span>
             ),
             onCell: () => ({
                 style: {
-                    whiteSpace: 'normal',
-                    textOverflow: "hidden",
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    textOverflow: 'ellipsis',
                 },
             }),
         },
@@ -603,12 +612,14 @@ const Leaderboard: React.FC = () => {
                                 </Button>
                                 <Button
                                     size='small'
-                                    className='whitespace-nowrap shrink-0'
+                                    className={styles.exportButton}
                                     icon={<MdFileDownload />}
                                     onClick={() => setIsExportModalOpen(true)}
                                     disabled={loading}
+                                    aria-label='Export CSV'
+                                    title='Export CSV'
                                 >
-                                    Export CSV
+                                    <span className={styles.exportButtonText}>Export CSV</span>
                                 </Button>
                             </div>
 
