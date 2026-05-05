@@ -33,6 +33,22 @@ def _require_login_secret():
     )
 
 
+@oauth_bp.route("/")
+def index():
+    denied = _require_login_secret()
+    if denied:
+        return denied
+
+    return (
+        "GitHub OAuth endpoints\n\n"
+        "- /api/oauth/login?secret=...\n"
+        "- /api/oauth/status?secret=...\n"
+        "- /api/oauth/callback (GitHub redirect target)\n",
+        200,
+        {"Content-Type": "text/plain"},
+    )
+
+
 def _whoami_login(access_token: str) -> str:
     resp = requests.get(
         "https://api.github.com/user",
