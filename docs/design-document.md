@@ -257,9 +257,7 @@ This result drives the branch decision in the worker:
 - `is_auth_expiring_soon()` checks whether browser auth state (`auth.json`) used by Playwright is close to expiry.
 - `get_auth()` refreshes browser auth state for scraping operations that rely on a logged-in GitHub web session.
 
-> Note: API authentication now supports two modes in `backend/utils/github_api.py`:
-> 1) GitHub App installation tokens (preferred, auto-rotated in-process before expiry), and
-> 2) PAT/GITHUB_TOKEN fallback for legacy deployments.
+> Note: API authentication uses **user-scoped** tokens for GraphQL crawling (GitHub OAuth App access token, or `PAT`/`GITHUB_TOKEN`). GitHub App installation tokens are not used because GitHub Sponsors GraphQL fields commonly return `FORBIDDEN` under installation-token auth.
 
 ---
 

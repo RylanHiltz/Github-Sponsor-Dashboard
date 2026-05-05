@@ -13,6 +13,9 @@ rootusers.txt
 # ignore github browser authentication file
 auth.json
 
+# GitHub OAuth token cache (refreshable user token)
+.github-oauth-token.json
+
 # Log file of for scraper debugging
 scraper.log
 scraper.log.*

@@ -1,6 +1,7 @@
 import time
 import logging
 import base64
+import os
 from datetime import timedelta, datetime
 from dotenv import load_dotenv
 from backend.utils.github_api import postRequest
@@ -12,12 +13,97 @@ from playwright.sync_api import sync_playwright
 from backend.db.queries.users import getGithubIDs
 from backend.db.queries.queue import batchAddQueue
 
-
 load_dotenv()
 
 # Globals
 URL = "https://api.github.com/graphql"
 SPONSORS_URL = "https://github.com/sponsors/explore"
+
+
+def _truthy_env(name: str, default: str = "false") -> bool:
+    value = (os.getenv(name) or default).strip().lower()
+    return value in ("1", "true", "yes", "y", "on")
+
+
+def _sponsors_as_maintainer_query(user_type: str, include_private: bool) -> str:
+    include_private_literal = "true" if include_private else "false"
+    return f"""
+        query($nodeId: ID!, $cursor: String) {{
+            node(id: $nodeId) {{
+                ... on {user_type.title()} {{
+                    sponsorshipsAsMaintainer(first: 100, after: $cursor, includePrivate: {include_private_literal}) {{
+                        totalCount
+                        pageInfo {{
+                            endCursor
+                            hasNextPage
+                        }}
+                        nodes {{
+                            privacyLevel
+                            sponsorEntity {{
+                                ... on User {{ databaseId }}
+                                ... on Organization {{ databaseId }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        """
+
+
+def _fetch_lowest_tier_cost(node_id: str, user_type: str) -> float:
+    """Best-effort: fetch lowest monthly tier price.
+
+    This commonly returns FORBIDDEN for some accounts/tokens. Tier pricing is optional
+    and should never block ingestion of sponsorship edges.
+    """
+    query = {
+        "query": f"""
+        query($nodeId: ID!) {{
+          node(id: $nodeId) {{
+            ... on {user_type.title()} {{
+              sponsorsListing {{
+                tiers(first: 20) {{
+                  nodes {{
+                    monthlyPriceInCents
+                    isOneTime
+                  }}
+                }}
+              }}
+            }}
+          }}
+        }}
+        """,
+        "variables": {"nodeId": node_id},
+    }
+
+    try:
+        resp = postRequest(url=URL, json=query, auth_mode="user")
+        data = resp.json()
+    except Exception as exc:
+        logging.debug("Tier pricing query failed: %s", exc)
+        return 0
+
+    if "errors" in data:
+        # Most commonly: FORBIDDEN on sponsorsListing. Ignore.
+        logging.debug("Tier pricing GraphQL errors: %s", data.get("errors"))
+        return 0
+
+    entity_data = data.get("data", {}).get("node", {})
+    sponsors_listing = entity_data.get("sponsorsListing") if entity_data else None
+    tiers = (
+        sponsors_listing.get("tiers", {}).get("nodes", []) if sponsors_listing else []
+    )
+    monthly_prices_in_cents = [
+        tier.get("monthlyPriceInCents")
+        for tier in tiers
+        if tier
+        and not tier.get("isOneTime")
+        and tier.get("monthlyPriceInCents") is not None
+    ]
+    if not monthly_prices_in_cents:
+        return 0
+    return min(monthly_prices_in_cents) / 100
 
 
 # Parent function to handle both functions running
@@ -57,46 +143,30 @@ def get_sponsors_from_api(github_id, user_type):
     sponsors_list: list[int] = []
     private_sponsors_count = 0
     lowest_tier_cost = 0
+    include_private = _truthy_env("GITHUB_SPONSORS_INCLUDE_PRIVATE", default="false")
     has_next_page = True
     cursor = None
     response = None
 
     # Dynamic query template for the Github GraphQL API
     # snippet-start: GraphQL-Sponsor-Query
-    query_template = f"""
-    query($nodeId: ID!, $cursor: String) {{
-      node(id: $nodeId) {{
-        ... on {user_type.title()} {{
-          sponsorshipsAsMaintainer(first: 100, after: $cursor, includePrivate: true) {{
-            totalCount
-            pageInfo {{
-              endCursor
-              hasNextPage
-            }}
-            nodes {{
-              privacyLevel
-              sponsorEntity {{
-                ... on User {{ databaseId }}
-                ... on Organization {{ databaseId }}
-              }}
-            }}
-          }}
-          sponsorsListing {{
-            tiers(first: 20) {{
-              nodes {{
-                monthlyPriceInCents
-                isOneTime
-              }}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
+    query_template = _sponsors_as_maintainer_query(
+        user_type=user_type,
+        include_private=include_private,
+    )
     # snippet-end
 
     print(f"Starting Sponsors Fetch for {user_type} ''")
     start_time = time.time()
+
+    # Best-effort tier pricing: do it once, separately, and never fail ingestion.
+    # (This avoids GraphQL partial-data errors from blocking sponsorship edge crawling.)
+    try:
+        lowest_tier_cost = _fetch_lowest_tier_cost(node_id=node_id, user_type=user_type)
+        if lowest_tier_cost:
+            logging.info(f"Lowest monthly tier: ${lowest_tier_cost:.2f}")
+    except Exception:
+        lowest_tier_cost = 0
 
     while has_next_page:
         # Corrected variables dictionary. The key 'nodeId' must match the query variable '$nodeId'.
@@ -104,34 +174,47 @@ def get_sponsors_from_api(github_id, user_type):
         query = {"query": query_template, "variables": variables}
 
         try:
-            response = postRequest(url=URL, json=query)
+            # GitHub Sponsors GraphQL fields are not reliably accessible via GitHub App installation tokens.
+            # Force a user token (PAT/OAuth) for sponsorship ingestion.
+            response = postRequest(url=URL, json=query, auth_mode="user")
             data = response.json()
         except Exception as e:
             logging.error(f"Failed to fetch sponsors. Error: {e}")
             break
 
         if "errors" in data:
-            logging.error(f"GraphQL errors: {data['errors']}")
-            # DO NOT BREAK. RAISE EXCEPTION.
+            errors = data.get("errors", [])
+            logging.error(f"GraphQL errors: {errors}")
+
+            # If we attempted includePrivate=true and it caused a forbidden error,
+            # retry without private sponsorships. Private sponsorship visibility is
+            # often restricted to the sponsorable account itself.
+            forbidden = [e for e in errors if e.get("type") == "FORBIDDEN"]
+            if include_private and forbidden:
+                include_private = False
+                query_template = _sponsors_as_maintainer_query(
+                    user_type=user_type,
+                    include_private=include_private,
+                )
+                logging.warning(
+                    "FORBIDDEN while requesting private sponsorships; retrying with includePrivate=false."
+                )
+                continue
+
+            if any(err.get("type") == "FORBIDDEN" for err in errors):
+                raise Exception(
+                    "GitHub GraphQL returned FORBIDDEN for sponsorship fields. "
+                    "This can happen depending on the target account and token permissions; "
+                    "try using a different user token (OAuth/PAT), and note that private sponsorships/tier info "
+                    "may not be accessible for arbitrary accounts."
+                )
+
             raise Exception("Partial fetch detected: GraphQL returned errors.")
 
         entity_data = data.get("data", {}).get("node", {})
         if not entity_data:
             # If we expected data but got none, abort.
             raise Exception("Partial fetch detected: Node data missing.")
-
-        if not cursor:  # First page
-            sponsors_listing = entity_data.get("sponsorsListing")
-            if sponsors_listing and sponsors_listing.get("tiers"):
-                tiers = sponsors_listing["tiers"]["nodes"]
-                monthly_prices_in_cents = [
-                    tier["monthlyPriceInCents"]
-                    for tier in tiers
-                    if not tier.get("isOneTime") and "monthlyPriceInCents" in tier
-                ]
-                if monthly_prices_in_cents:
-                    lowest_tier_cost = min(monthly_prices_in_cents) / 100
-                    logging.info(f"Lowest monthly tier: ${lowest_tier_cost:.2f}")
 
         sponsorships = entity_data.get("sponsorshipsAsMaintainer")
         if not sponsorships:
@@ -213,7 +296,8 @@ def get_sponsored_from_api(github_id, user_type):
         query = {"query": query_template, "variables": variables}
 
         try:
-            response = postRequest(url=URL, json=query)
+            # GitHub Sponsors GraphQL fields are not reliably accessible via GitHub App installation tokens.
+            response = postRequest(url=URL, json=query, auth_mode="user")
             data = response.json()
         except Exception as e:
             logging.error(f"Failed to fetch sponsored for ID '{github_id}'. Error: {e}")
@@ -222,6 +306,11 @@ def get_sponsored_from_api(github_id, user_type):
 
         if "errors" in data:
             logging.error(f"GraphQL errors: {data['errors']}")
+            if any(err.get("type") == "FORBIDDEN" for err in data.get("errors", [])):
+                raise Exception(
+                    "GitHub GraphQL returned FORBIDDEN for Sponsors fields. "
+                    "Configure a user token (PAT/OAuth) via `PAT` for sponsorship ingestion."
+                )
             # FIX: Raise exception to protect DB
             raise Exception("Partial fetch detected: GraphQL returned errors.")
 

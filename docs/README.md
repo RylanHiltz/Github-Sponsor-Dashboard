@@ -58,10 +58,11 @@ The worker is configured via environment variables. Create a `.env` file in the 
 | :------------ | :------------------------------------------------------------------------------------------------------ |
 | `PAT`         | A GitHub Personal Access Token with `user` and `read:org` scopes (fallback auth mode).                   |
 | `GITHUB_TOKEN`| Alternative fallback token variable, equivalent to `PAT`.                                                 |
-| `GITHUB_APP_ID` | GitHub App ID (enables automatic short-lived installation token rotation).                              |
-| `GITHUB_APP_INSTALLATION_ID` | Installation ID for the GitHub App in the target account/org.                           |
-| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key PEM content (supports escaped newlines `\\n`).                         |
-| `GITHUB_APP_PRIVATE_KEY_PATH` | Optional path to private key PEM file (use instead of inline key).                      |
+| `GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth App client ID (refreshable user token; avoids manual PAT rotation).                 |
+| `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth App client secret (required for refresh).                                       |
+| `GITHUB_OAUTH_SCOPES` | Optional OAuth scopes (often empty; if org queries fail, try `read:org`).                           |
+| `GITHUB_OAUTH_TOKEN_PATH` | Optional path to store OAuth token JSON (default: `.github-oauth-token.json`).                  |
+| `FLASK_SECRET_KEY` | Flask session secret (required for `/api/oauth/login` state tracking).                                |
 | `host`        | The hostname of your PostgreSQL database.                                                               |
 | `port`        | The port for your PostgreSQL database.                                                                  |
 | `user`        | The username for your PostgreSQL database.                                                              |
@@ -96,6 +97,33 @@ python backend/app.py
 ```
 
 By default, the API will be available at `http://127.0.0.1:5000`.
+
+#### GitHub OAuth App setup (recommended)
+
+GitHub Sponsors GraphQL fields commonly return `FORBIDDEN` when queried with **GitHub App installation tokens**. To avoid manually rotating a PAT, this project supports using a **GitHub OAuth App** access token.
+
+1) Create a GitHub OAuth App:
+  - GitHub → Settings → Developer settings → OAuth Apps → New OAuth App
+  - Homepage URL: `http://127.0.0.1:5000`
+  - Authorization callback URL: `http://127.0.0.1:5000/api/oauth/callback`
+
+2) Add to your `.env` (see `.env.example`):
+  - `GITHUB_OAUTH_CLIENT_ID=...`
+  - `GITHUB_OAUTH_CLIENT_SECRET=...`
+  - `FLASK_SECRET_KEY=...`
+  - Optional hardening:
+    - `GITHUB_OAUTH_ALLOWED_LOGIN=your-github-username`
+    - `GITHUB_OAUTH_LOGIN_SECRET=...`
+
+3) Start the backend server:
+  - `python backend/app.py`
+
+4) Authorize once in your browser:
+  - Visit `http://127.0.0.1:5000/api/oauth/login`
+  - Complete GitHub authorization
+  - The backend saves a local token cache to `.github-oauth-token.json` (gitignored)
+
+After that, sponsorship ingestion will use the OAuth access token. If the token is revoked/invalidated, re-run `http://127.0.0.1:5000/api/oauth/login` to generate a new one.
 
 #### Frontend Development Server
 

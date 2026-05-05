@@ -2,178 +2,56 @@ import requests
 import time
 import os
 import logging
-import threading
-from pathlib import Path
-from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    import jwt
-except ImportError:  # pragma: no cover - exercised only when dependency missing
-    jwt = None
 
-
-_APP_TOKEN_CACHE = {"token": None, "expires_at": None}
-_APP_TOKEN_LOCK = threading.Lock()
-_APP_TOKEN_REFRESH_BUFFER_SECONDS = 120
-
-
-def _resolve_private_key_path(key_path: str) -> Path:
-    """Resolve a private key path.
-
-    Supports absolute paths and relative paths.
-    - First tries relative-to-CWD (matches prior behavior).
-    - If not found, tries relative-to-repo-root (more ergonomic for .env in repo root).
-    """
-    candidate = Path(key_path).expanduser()
-    if candidate.is_absolute():
-        return candidate
-
-    cwd_candidate = (Path.cwd() / candidate).resolve()
-    if cwd_candidate.exists():
-        return cwd_candidate
-
-    # backend/utils/github_api.py -> repo root is two parents up from backend/
-    repo_root = Path(__file__).resolve().parents[2]
-    return (repo_root / candidate).resolve()
-
-
-def _read_github_app_private_key() -> str:
-    key = (os.getenv("GITHUB_APP_PRIVATE_KEY") or "").strip()
-    if key:
-        return key.replace("\\n", "\n")
-
-    key_path = (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
-    if key_path:
-        resolved = _resolve_private_key_path(key_path)
-        if not resolved.exists():
-            raise RuntimeError(
-                "GitHub App auth is enabled but private key file was not found. "
-                f"GITHUB_APP_PRIVATE_KEY_PATH='{key_path}' resolved to '{resolved}'."
-            )
-        with open(resolved, "r", encoding="utf-8") as fh:
-            return fh.read()
-
-    raise RuntimeError(
-        "GitHub App auth is enabled but no private key found. "
-        "Set `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH`."
-    )
-
-
-def _github_app_auth_enabled() -> bool:
-    return bool(
-        (os.getenv("GITHUB_APP_ID") or "").strip()
-        and (os.getenv("GITHUB_APP_INSTALLATION_ID") or "").strip()
-        and (
-            (os.getenv("GITHUB_APP_PRIVATE_KEY") or "").strip()
-            or (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
-        )
-    )
-
-
-def _get_cached_app_token(now: datetime) -> str | None:
-    expires_at = _APP_TOKEN_CACHE.get("expires_at")
-    token = _APP_TOKEN_CACHE.get("token")
-    if not token or not expires_at:
-        return None
-
-    if expires_at > now + timedelta(seconds=_APP_TOKEN_REFRESH_BUFFER_SECONDS):
-        return token
-    return None
-
-
-def _build_github_app_jwt(app_id: str, private_key: str) -> str:
-    if jwt is None:
-        raise RuntimeError(
-            "GitHub App auth requires PyJWT. Install dependencies and retry."
-        )
-
-    now = datetime.now(timezone.utc)
-    payload = {
-        "iat": int((now - timedelta(seconds=60)).timestamp()),
-        "exp": int((now + timedelta(minutes=9)).timestamp()),
-        "iss": app_id,
-    }
-    return jwt.encode(payload, private_key, algorithm="RS256")
-
-
-def _request_installation_token() -> tuple[str, datetime]:
-    app_id = (os.getenv("GITHUB_APP_ID") or "").strip()
-    installation_id = (os.getenv("GITHUB_APP_INSTALLATION_ID") or "").strip()
-
-    if not app_id or not installation_id:
-        raise RuntimeError(
-            "GitHub App auth requires `GITHUB_APP_ID` and `GITHUB_APP_INSTALLATION_ID`."
-        )
-
-    private_key = _read_github_app_private_key()
-    app_jwt = _build_github_app_jwt(app_id, private_key)
-    url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
-
-    response = requests.post(
-        url=url,
-        headers={
-            "Authorization": f"Bearer {app_jwt}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": os.getenv("GITHUB_USER_AGENT", "Github-Sponsor-Dashboard"),
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
-
-    token = data.get("token")
-    expires_at_raw = data.get("expires_at")
-    if not token or not expires_at_raw:
-        raise RuntimeError(
-            "GitHub App token exchange succeeded but response was missing token fields."
-        )
-
-    expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
-    return token, expires_at
-
-
-def _get_github_app_installation_token() -> str:
-    now = datetime.now(timezone.utc)
-    cached = _get_cached_app_token(now)
-    if cached:
-        return cached
-
-    with _APP_TOKEN_LOCK:
-        now = datetime.now(timezone.utc)
-        cached = _get_cached_app_token(now)
-        if cached:
-            return cached
-
-        token, expires_at = _request_installation_token()
-        _APP_TOKEN_CACHE["token"] = token
-        _APP_TOKEN_CACHE["expires_at"] = expires_at
+def _get_user_token() -> str:
+    """Return a *user-scoped* GitHub token."""
+    token = (os.getenv("PAT") or os.getenv("GITHUB_TOKEN") or "").strip()
+    if token:
         return token
 
+    # OAuth App token fallback. This avoids manually rotating PATs.
+    try:
+        from backend.utils.github_oauth import get_valid_access_token
 
-def _get_github_token() -> str:
+        return get_valid_access_token()
+    except Exception as exc:
+        raise RuntimeError(
+            "Missing user GitHub auth. Set `PAT` / `GITHUB_TOKEN`, or configure GitHub OAuth "
+            "via `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET` and run /api/oauth/login. "
+            f"OAuth error: {exc}"
+        )
+
+
+def _get_github_token(auth_mode: str = "auto") -> str:
     """Return GitHub auth token from environment.
 
-    This project historically uses `PAT`. We also accept `GITHUB_TOKEN` as an alias
-    to reduce configuration footguns.
+    Parameters
+    ----------
+    auth_mode:
+        - "auto": use a user token (OAuth if available, else PAT/GITHUB_TOKEN)
+        - "user": same as "auto" (explicit user-scoped token)
+        - "app": unsupported (GitHub App auth removed)
     """
-    if _github_app_auth_enabled():
-        return _get_github_app_installation_token()
+    mode = (auth_mode or "auto").strip().lower()
 
-    token = (os.getenv("PAT") or os.getenv("GITHUB_TOKEN") or "").strip()
-    if not token:
+    if mode in ("auto", "user"):
+        return _get_user_token()
+
+    if mode == "app":
         raise RuntimeError(
-            "Missing GitHub auth configuration. Set GitHub App env vars "
-            "(`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`/`..._PATH`) "
-            "or set `PAT` (preferred) / `GITHUB_TOKEN`."
+            "GitHub App installation-token auth has been removed from this project. "
+            "Use GitHub OAuth App auth (/api/oauth/login) or set `PAT` / `GITHUB_TOKEN`."
         )
-    return token
+
+    raise ValueError("auth_mode must be one of: 'auto', 'user'")
 
 
-def _build_headers() -> dict:
-    token = _get_github_token()
+def _build_headers(auth_mode: str = "auto") -> dict:
+    token = _get_github_token(auth_mode=auth_mode)
     return {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -183,8 +61,8 @@ def _build_headers() -> dict:
 
 
 # Function to automatically detect API limits if they occur when running GET requests
-def getRequest(url):
-    headers = _build_headers()
+def getRequest(url, auth_mode: str = "auto"):
+    headers = _build_headers(auth_mode=auth_mode)
     while True:
         res = requests.get(url=url, headers=headers)
 
@@ -212,7 +90,14 @@ def getRequest(url):
 
 # Function to automatically detect API limits if they occur when running POST requests
 # (Specifically to the Github GraphQL API)
-def postRequest(url, json=None, initial_delay=2, max_retries=5, timeout=30):
+def postRequest(
+    url,
+    json=None,
+    initial_delay=2,
+    max_retries=5,
+    timeout=30,
+    auth_mode: str = "auto",
+):
     """Sends a POST request with retries for server errors and rate limits.
     Args:
         url (str): The URL to send the request to.
@@ -226,7 +111,7 @@ def postRequest(url, json=None, initial_delay=2, max_retries=5, timeout=30):
     Returns:
         requests.Response: The response object on success.
     """
-    headers = _build_headers()
+    headers = _build_headers(auth_mode=auth_mode)
 
     for attempt in range(max_retries):
         try:

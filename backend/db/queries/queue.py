@@ -161,7 +161,10 @@ def addToQueue(username, db):
         "variables": {"username": username},
     }
 
-    response = postRequest("https://api.github.com/graphql", json=graphql_query)
+    # Sponsors-related GraphQL fields are often forbidden for GitHub App installation tokens.
+    response = postRequest(
+        "https://api.github.com/graphql", json=graphql_query, auth_mode="user"
+    )
 
     if response.status_code != 200:
         return {"success": False, "error": "GitHub API error"}, response.status_code
