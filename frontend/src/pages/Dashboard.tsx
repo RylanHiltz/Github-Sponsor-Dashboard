@@ -13,6 +13,8 @@ import { MdDarkMode, MdLightMode } from 'react-icons/md';
 import { IoMdStats } from "react-icons/io";
 
 
+const GITHUB_PROFILE_URL = 'https://github.com/RylanHiltz/Github-Sponsor-Dashboard';
+
 const { Header, Content, Sider } = Layout;
 
 const DashboardContent: React.FC = () => {
@@ -129,6 +131,19 @@ const DashboardContent: React.FC = () => {
 
                 {/* Desktop actions */}
                 <div className='hidden md:flex items-center gap-3 pr-[20px] shrink-0'>
+                    <a
+                        href={GITHUB_PROFILE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: 'inherit' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = linkHover)}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = 'inherit')}
+                        className='flex items-center gap-1.5 px-2'
+                        aria-label='Open GitHub profile'
+                    >
+                        <AiFillGithub className='text-[18px]' />
+                        <span className='font-medium'>GitHub</span>
+                    </a>
                     <DarkmodeButton />
                 </div>
             </Header>
@@ -205,15 +220,27 @@ const DashboardContent: React.FC = () => {
                         <Button
                             type='text'
                             block
-                            onClick={toggleTheme}
-                            className='h-auto py-2 flex items-center justify-between'
+                            href={GITHUB_PROFILE_URL}
+                            target='_blank'
+                            rel='noreferrer'
+                            className='h-auto py-2 flex items-center justify-start gap-2'
                         >
-                            <span className='font-medium'>Dark mode</span>
+                            <AiFillGithub className='text-[18px]' />
+                            <span className='font-medium'>GitHub</span>
+                        </Button>
+
+                        <Button
+                            type='text'
+                            block
+                            onClick={toggleTheme}
+                            className='h-auto py-2 flex items-center justify-start gap-2'
+                        >
                             {appThemeMode === 'dark' ? (
                                 <MdDarkMode className='text-[18px]' />
                             ) : (
                                 <MdLightMode className='text-[18px]' />
                             )}
+                            <span className='font-medium'>Dark mode</span>
                         </Button>
                     </div>
                 </Drawer>
